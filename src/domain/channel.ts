@@ -332,3 +332,4 @@ export const createEmptyChannel = (): Channel => {
     updatedAt: now
   };
 };
+

@@ -14,11 +14,13 @@ const processedFiles = new Map<string, number>();
 /**
  * Проверяет, был ли файл уже обработан
  */
-async function isFileProcessed(channelId: string, fileId: string): Promise<boolean> {
-  // Проверяем в памяти
+async function isFileProcessed(channelId: string, fileId: string): Promise<{ processed: boolean; source?: 'memory' | 'firestore'; processedAt?: number }> {
   const memoryKey = `${channelId}:${fileId}`;
+  
+  // Проверяем в памяти
   if (processedFiles.has(memoryKey)) {
-    return true;
+    const processedAt = processedFiles.get(memoryKey);
+    return { processed: true, source: 'memory', processedAt };
   }
 
   // Проверяем в Firestore (для персистентности между перезапусками)
@@ -34,7 +36,11 @@ async function isFileProcessed(channelId: string, fileId: string): Promise<boole
         const data = doc.data();
         if (data?.processedAt) {
           processedFiles.set(memoryKey, data.processedAt);
-          return true;
+          return { 
+            processed: true, 
+            source: 'firestore', 
+            processedAt: data.processedAt 
+          };
         }
       }
     } catch (error) {
@@ -47,7 +53,7 @@ async function isFileProcessed(channelId: string, fileId: string): Promise<boole
     }
   }
 
-  return false;
+  return { processed: false };
 }
 
 /**
@@ -83,6 +89,20 @@ async function markFileAsProcessed(channelId: string, fileId: string): Promise<v
 }
 
 /**
+ * Очищает ID папки Google Drive от параметров URL (например, ?hl=ru)
+ */
+function cleanFolderId(folderId: string): string {
+  if (!folderId) return folderId;
+  // Удаляем параметры URL, если они есть
+  // Например: "1BBP3gnYws01siBUs0GQeIYx2j8Nm8Jvy?hl=ru" -> "1BBP3gnYws01siBUs0GQeIYx2j8Nm8Jvy"
+  const questionMarkIndex = folderId.indexOf('?');
+  if (questionMarkIndex !== -1) {
+    return folderId.substring(0, questionMarkIndex);
+  }
+  return folderId;
+}
+
+/**
  * Получает список новых файлов в папке Google Drive
  */
 export async function getNewFilesInFolder(
@@ -91,8 +111,33 @@ export async function getNewFilesInFolder(
 ): Promise<Array<{ id: string; name: string; createdTime: string; webContentLink?: string }>> {
   const drive = getDriveClient(true);
 
+  // Очищаем folderId от параметров URL
+  const cleanId = cleanFolderId(folderId);
+
   try {
-    const query = `'${folderId}' in parents and trashed = false and mimeType contains 'video/'`;
+    // Сначала проверяем, есть ли вообще файлы в папке (для диагностики)
+    const allFilesQuery = `'${cleanId}' in parents and trashed = false`;
+    const allFilesResponse = await drive.files.list({
+      q: allFilesQuery,
+      fields: "files(id, name, mimeType, createdTime)",
+      pageSize: 10
+    });
+    
+    const allFilesCount = allFilesResponse.data.files?.length || 0;
+    const allFiles = allFilesResponse.data.files || [];
+    
+    Logger.info("blottataDriveMonitor: Checking folder contents", {
+      folderId: cleanId,
+      totalFilesInFolder: allFilesCount,
+      sampleFiles: allFiles.slice(0, 5).map(f => ({
+        name: f.name,
+        mimeType: f.mimeType,
+        isVideo: f.mimeType?.includes('video/') || false
+      }))
+    });
+    
+    // Теперь ищем только видеофайлы
+    const query = `'${cleanId}' in parents and trashed = false and mimeType contains 'video/'`;
     
     const response = await drive.files.list({
       q: query,
@@ -101,7 +146,19 @@ export async function getNewFilesInFolder(
       pageSize: 50
     });
 
-    const files = (response.data.files || []).map((file) => ({
+    const videoFiles = response.data.files || [];
+    
+    Logger.info("blottataDriveMonitor: Video files found", {
+      folderId: cleanId,
+      totalFilesInFolder: allFilesCount,
+      videoFilesCount: videoFiles.length,
+      videoFiles: videoFiles.slice(0, 5).map(f => ({
+        name: f.name,
+        mimeType: f.mimeType
+      }))
+    });
+
+    const files = videoFiles.map((file) => ({
       id: file.id!,
       name: file.name || "unknown",
       createdTime: file.createdTime || new Date().toISOString(),
@@ -122,7 +179,8 @@ export async function getNewFilesInFolder(
     const errorMessage = error?.message || String(error);
     
     Logger.error("blottataDriveMonitor: Failed to list files in folder", {
-      folderId,
+      folderId: cleanId,
+      originalFolderId: folderId,
       error: errorMessage,
       code: errorCode,
       errorName: error?.name,
@@ -131,10 +189,10 @@ export async function getNewFilesInFolder(
 
     // Детализируем ошибки доступа к Google Drive
     if (errorCode === 404) {
-      throw new Error(`GOOGLE_DRIVE_FOLDER_NOT_FOUND: Folder not found (ID: ${folderId}). Check folder ID.`);
+      throw new Error(`GOOGLE_DRIVE_FOLDER_NOT_FOUND: Folder not found (ID: ${cleanId}). Check folder ID.`);
     }
     if (errorCode === 403) {
-      throw new Error(`GOOGLE_DRIVE_PERMISSION_DENIED: Access denied to folder (ID: ${folderId}). Check permissions.`);
+      throw new Error(`GOOGLE_DRIVE_PERMISSION_DENIED: Access denied to folder (ID: ${cleanId}). Check permissions.`);
     }
     
     throw error;
@@ -160,13 +218,17 @@ export async function processNewFilesForChannel(channel: Channel): Promise<{
   }
 
   try {
+    // Очищаем folderId от параметров URL
+    const cleanedFolderId = cleanFolderId(channel.driveInputFolderId!);
+    
     Logger.info("blottataDriveMonitor: Checking folder for new files", {
       channelId: channel.id,
-      folderId: channel.driveInputFolderId
+      folderId: cleanedFolderId,
+      originalFolderId: channel.driveInputFolderId
     });
 
     // Получаем список файлов в папке
-    const files = await getNewFilesInFolder(channel.driveInputFolderId);
+    const files = await getNewFilesInFolder(cleanedFolderId);
 
     Logger.info("blottataDriveMonitor: Found files in folder", {
       channelId: channel.id,
@@ -174,17 +236,48 @@ export async function processNewFilesForChannel(channel: Channel): Promise<{
       filesCount: files.length
     });
 
+    // Для каналов с Google Drive Folder ID всегда переобрабатываем файлы
+    // даже если они уже были обработаны ранее
+    const alwaysReprocessFromDrive = Boolean(channel.driveInputFolderId);
+
     // Обрабатываем каждый файл
     for (const file of files) {
-      // Проверяем, не был ли файл уже обработан
-      if (await isFileProcessed(channel.id, file.id)) {
-        Logger.info("blottataDriveMonitor: File already processed, skipping", {
-          channelId: channel.id,
-          fileId: file.id,
-          fileName: file.name
-        });
-        result.skipped++;
-        continue;
+      if (!alwaysReprocessFromDrive) {
+        // Для каналов БЕЗ Google Drive Folder ID проверяем, был ли файл уже обработан
+        // и пропускаем его, если он уже был обработан
+        const processedCheck = await isFileProcessed(channel.id, file.id);
+        if (processedCheck.processed) {
+          const processedDate = processedCheck.processedAt 
+            ? new Date(processedCheck.processedAt).toISOString() 
+            : 'unknown';
+          Logger.info("blottataDriveMonitor: File already processed, skipping", {
+            channelId: channel.id,
+            fileId: file.id,
+            fileName: file.name,
+            source: processedCheck.source,
+            processedAt: processedDate,
+            processedAtTimestamp: processedCheck.processedAt
+          });
+          result.skipped++;
+          continue;
+        }
+      } else {
+        // Для каналов С Google Drive Folder ID всегда обрабатываем файлы,
+        // даже если они уже были обработаны ранее
+        // Логируем информацию о повторной обработке, если файл уже был обработан
+        const existingCheck = await isFileProcessed(channel.id, file.id);
+        if (existingCheck.processed) {
+          const processedDate = existingCheck.processedAt 
+            ? new Date(existingCheck.processedAt).toISOString() 
+            : 'unknown';
+          Logger.info("blottataDriveMonitor: File will be reprocessed (Google Drive folder)", {
+            channelId: channel.id,
+            fileId: file.id,
+            fileName: file.name,
+            previouslyProcessedAt: processedDate,
+            reason: "alwaysReprocessFromDrive enabled"
+          });
+        }
       }
 
       try {

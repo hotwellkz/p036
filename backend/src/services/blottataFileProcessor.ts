@@ -15,6 +15,20 @@ interface ProcessedFile {
 }
 
 /**
+ * Очищает ID папки Google Drive от параметров URL (например, ?hl=ru)
+ */
+function cleanFolderId(folderId: string): string {
+  if (!folderId) return folderId;
+  // Удаляем параметры URL, если они есть
+  // Например: "1BBP3gnYws01siBUs0GQeIYx2j8Nm8Jvy?hl=ru" -> "1BBP3gnYws01siBUs0GQeIYx2j8Nm8Jvy"
+  const questionMarkIndex = folderId.indexOf('?');
+  if (questionMarkIndex !== -1) {
+    return folderId.substring(0, questionMarkIndex);
+  }
+  return folderId;
+}
+
+/**
  * Обрабатывает файл из Google Drive: генерирует описание, публикует через Blottata, перемещает в архив
  */
 export async function processBlottataFile(
@@ -32,7 +46,10 @@ export async function processBlottataFile(
   try {
     Logger.info("BlottataFileProcessor: Starting file processing", {
       channelId: channel.id,
-      fileId
+      fileId,
+      driveInputFolderId: channel.driveInputFolderId || "not set",
+      driveArchiveFolderId: channel.driveArchiveFolderId || "not set",
+      blotataEnabled: channel.blotataEnabled || false
     });
 
     // 1. Получаем информацию о файле из Google Drive
@@ -116,30 +133,62 @@ export async function processBlottataFile(
       throw new Error(`All platforms failed: ${errors.join("; ")}`);
     }
 
-    // 5. Перемещаем файл в архивную папку
-    if (channel.driveArchiveFolderId) {
+    // 5. Перемещаем файл из входной папки в архивную папку после успешной публикации
+    const rawInputFolderId = channel.driveInputFolderId;
+    const rawArchiveFolderId = channel.driveArchiveFolderId;
+
+    // Очищаем folderId от параметров URL (например, ?hl=ru)
+    const inputFolderId = rawInputFolderId ? cleanFolderId(rawInputFolderId) : undefined;
+    const archiveFolderId = rawArchiveFolderId ? cleanFolderId(rawArchiveFolderId) : undefined;
+
+    if (inputFolderId && archiveFolderId) {
+      Logger.info("BlottataFileProcessor: Moving file to archive folder", {
+        channelId: channel.id,
+        fileId,
+        fileName: result.fileName,
+        inputFolderId,
+        archiveFolderId,
+        originalInputFolderId: rawInputFolderId,
+        originalArchiveFolderId: rawArchiveFolderId
+      });
+
       try {
-        await moveFileToArchive(drive, fileId, channel.driveArchiveFolderId);
-        Logger.info("BlottataFileProcessor: File moved to archive", {
+        await moveFileToArchive(drive, fileId, inputFolderId, archiveFolderId);
+        
+        Logger.info("BlottataFileProcessor: File successfully moved to archive folder", {
           channelId: channel.id,
           fileId,
-          archiveFolderId: channel.driveArchiveFolderId
+          fileName: result.fileName,
+          inputFolderId,
+          archiveFolderId
         });
       } catch (moveError: any) {
-        Logger.error("BlottataFileProcessor: Failed to move file to archive", {
+        Logger.error("BlottataFileProcessor: Failed to move file to archive folder", {
           channelId: channel.id,
           fileId,
-          error: moveError?.message || String(moveError)
+          fileName: result.fileName,
+          inputFolderId,
+          archiveFolderId,
+          error: moveError?.message || String(moveError),
+          errorCode: moveError?.code,
+          errorStack: moveError?.stack
         });
         // Не считаем это критической ошибкой, если публикация прошла успешно
+        // Файл останется во входной папке и будет обработан снова при следующем цикле
         if (result.errors.length === 0) {
           result.errors.push(`Archive move failed: ${moveError?.message || "Unknown error"}`);
         }
       }
     } else {
-      Logger.warn("BlottataFileProcessor: Archive folder not configured, file not moved", {
+      Logger.warn("BlottataFileProcessor: Archive folder is not configured for channel, skipping move", {
         channelId: channel.id,
-        fileId
+        fileId,
+        fileName: result.fileName,
+        inputFolderId: inputFolderId || "not set",
+        archiveFolderId: archiveFolderId || "not set",
+        rawInputFolderId: rawInputFolderId || "not set",
+        rawArchiveFolderId: rawArchiveFolderId || "not set",
+        note: "File will remain in input folder and may be reprocessed"
       });
     }
 
@@ -165,40 +214,113 @@ export async function processBlottataFile(
 }
 
 /**
- * Перемещает файл из текущей папки в архивную папку
+ * Перемещает файл из входной папки в архивную папку Google Drive
+ * Удаляет файл из входной папки и добавляет в архивную папку
+ * Поддерживает как обычные папки, так и Shared Drives
  */
 async function moveFileToArchive(
   drive: drive_v3.Drive,
   fileId: string,
+  inputFolderId: string,
   archiveFolderId: string
 ): Promise<void> {
+  // Параметры для поддержки Shared Drives (если используются)
+  const driveParams = {
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true
+  };
+
   try {
+    Logger.info("BlottataFileProcessor: Getting file info before move", {
+      fileId,
+      inputFolderId,
+      archiveFolderId
+    });
+
     // Получаем текущие родители файла
     const file = await drive.files.get({
       fileId,
-      fields: "parents"
+      fields: "id, name, parents",
+      ...driveParams
     });
 
-    const previousParents = file.data.parents?.join(",") || "";
-
-    // Перемещаем файл: удаляем старых родителей и добавляем архивную папку
-    await drive.files.update({
+    const currentParents = file.data.parents || [];
+    const fileName = file.data.name || "unknown";
+    const isInInputFolder = currentParents.includes(inputFolderId);
+    
+    Logger.info("BlottataFileProcessor: File current parents", {
+      fileId,
+      fileName,
+      currentParents,
+      inputFolderId,
+      archiveFolderId,
+      isInInputFolder
+    });
+    
+    // Перемещаем файл: удаляем входную папку из родителей (если файл там находится) и добавляем архивную папку
+    let updateParams: any = {
       fileId,
       addParents: archiveFolderId,
-      removeParents: previousParents,
-      fields: "id, parents"
-    });
+      fields: "id, parents",
+      ...driveParams
+    };
 
-    Logger.info("BlottataFileProcessor: File moved successfully", {
+    if (isInInputFolder) {
+      // Файл находится во входной папке - удаляем его оттуда и добавляем в архивную
+      updateParams.removeParents = inputFolderId;
+      Logger.info("BlottataFileProcessor: Starting file move operation (remove from input, add to archive)", {
+        fileId,
+        fileName,
+        inputFolderId,
+        archiveFolderId,
+        operation: "removeParents + addParents"
+      });
+    } else {
+      // Файл не находится во входной папке - просто добавляем в архивную
+      Logger.warn("BlottataFileProcessor: File is not in input folder, adding to archive anyway", {
+        fileId,
+        fileName,
+        inputFolderId,
+        archiveFolderId,
+        currentParents,
+        note: "File will be added to archive folder without removing from input folder"
+      });
+    }
+
+    const updateResult = await drive.files.update(updateParams);
+
+    const newParents = updateResult.data.parents || [];
+
+    Logger.info("BlottataFileProcessor: File successfully moved from input folder to archive folder", {
       fileId,
-      archiveFolderId
+      fileName,
+      inputFolderId,
+      archiveFolderId,
+      previousParents: currentParents,
+      newParents
     });
   } catch (error: any) {
-    Logger.error("BlottataFileProcessor: Failed to move file", {
+    const errorCode = error?.code;
+    const errorMessage = error?.message || String(error);
+    
+    Logger.error("BlottataFileProcessor: Failed to move file to archive", {
       fileId,
+      inputFolderId,
       archiveFolderId,
-      error: error?.message || String(error)
+      error: errorMessage,
+      errorCode,
+      errorName: error?.name,
+      errorStack: error?.stack
     });
+
+    // Детализируем ошибки доступа к Google Drive
+    if (errorCode === 404) {
+      throw new Error(`GOOGLE_DRIVE_FOLDER_NOT_FOUND: Folder not found (input: ${inputFolderId}, archive: ${archiveFolderId}). Check folder IDs.`);
+    }
+    if (errorCode === 403) {
+      throw new Error(`GOOGLE_DRIVE_PERMISSION_DENIED: Access denied to folder (input: ${inputFolderId}, archive: ${archiveFolderId}). Check permissions.`);
+    }
+    
     throw error;
   }
 }

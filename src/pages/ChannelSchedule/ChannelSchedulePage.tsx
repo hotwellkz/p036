@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, ArrowLeft, RefreshCw, AlertTriangle } from "lucide-react";
+import { Loader2, ArrowLeft, RefreshCw, AlertTriangle, Pause, Play } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { fetchChannelSchedule, type ChannelScheduleItem } from "../../api/channelSchedule";
 import ChannelScheduleTable from "../../components/ChannelScheduleTable";
@@ -39,14 +39,16 @@ const ChannelSchedulePage = () => {
     minInterval_00_13: 11,
     minInterval_13_17: 11,
     minInterval_17_24: 11,
-    conflictsCheckEnabled: true
+    conflictsCheckEnabled: true,
+    isAutomationPaused: false
   });
   const [settingsDraft, setSettingsDraft] = useState<ScheduleSettings>({
     minIntervalMinutes: 11,
     minInterval_00_13: 11,
     minInterval_13_17: 11,
     minInterval_17_24: 11,
-    conflictsCheckEnabled: true
+    conflictsCheckEnabled: true,
+    isAutomationPaused: false
   });
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -321,6 +323,45 @@ const ChannelSchedulePage = () => {
     setSettingsError(null);
   };
 
+  const handleTogglePause = async () => {
+    const newPauseState = !settingsDraft.isAutomationPaused;
+    setSettingsDraft((prev) => ({
+      ...prev,
+      isAutomationPaused: newPauseState
+    }));
+
+    setIsSavingSettings(true);
+    setSettingsError(null);
+    setSettingsSuccessMessage(null);
+
+    try {
+      const updated = await updateScheduleSettings({
+        ...settingsDraft,
+        isAutomationPaused: newPauseState
+      });
+      setSettings(updated);
+      setSettingsDraft(updated);
+      setSettingsSuccessMessage(
+        newPauseState 
+          ? "Автоматизация поставлена на паузу" 
+          : "Автоматизация возобновлена"
+      );
+    } catch (err) {
+      setSettingsError(
+        err instanceof Error
+          ? err.message
+          : "Ошибка при изменении статуса паузы"
+      );
+      // Откатываем изменение при ошибке
+      setSettingsDraft((prev) => ({
+        ...prev,
+        isAutomationPaused: !newPauseState
+      }));
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
   const handleSaveSettings = async () => {
     // Валидация всех трех интервалов
     const validateInterval = (value: number | undefined, name: string): boolean => {
@@ -356,7 +397,8 @@ const ChannelSchedulePage = () => {
         minInterval_00_13: settingsDraft.minInterval_00_13!,
         minInterval_13_17: settingsDraft.minInterval_13_17!,
         minInterval_17_24: settingsDraft.minInterval_17_24!,
-        conflictsCheckEnabled: settingsDraft.conflictsCheckEnabled
+        conflictsCheckEnabled: settingsDraft.conflictsCheckEnabled,
+        isAutomationPaused: settingsDraft.isAutomationPaused
       });
       setSettings(updated);
       setSettingsDraft(updated);
@@ -389,6 +431,29 @@ const ChannelSchedulePage = () => {
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
             <button
+              onClick={handleTogglePause}
+              disabled={settingsLoading || isSavingSettings}
+              className={`flex min-h-[40px] items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition disabled:opacity-50 sm:px-4 ${
+                settingsDraft.isAutomationPaused
+                  ? "border-emerald-500/40 bg-emerald-900/20 text-emerald-200 hover:border-emerald-500/60 hover:bg-emerald-900/30"
+                  : "border-white/10 bg-slate-900/50 text-slate-200 hover:border-brand/40 hover:bg-slate-800/50"
+              }`}
+            >
+              {settingsDraft.isAutomationPaused ? (
+                <>
+                  <Play className="h-4 w-4" />
+                  <span className="hidden sm:inline">Снять с паузы</span>
+                  <span className="sm:hidden">Снять паузу</span>
+                </>
+              ) : (
+                <>
+                  <Pause className="h-4 w-4" />
+                  <span className="hidden sm:inline">Поставить на паузу</span>
+                  <span className="sm:hidden">Пауза</span>
+                </>
+              )}
+            </button>
+            <button
               onClick={loadSchedule}
               disabled={loading}
               className="flex min-h-[40px] items-center gap-2 rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-brand/40 hover:bg-slate-800/50 disabled:opacity-50 sm:px-4"
@@ -400,6 +465,21 @@ const ChannelSchedulePage = () => {
             <UserMenu />
           </div>
         </div>
+
+        {/* Баннер о статусе паузы */}
+        {!loading && !error && settings.isAutomationPaused && (
+          <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100">
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-400" />
+            <div className="flex-1 text-sm">
+              <p className="font-medium">
+                Автоматизация публикаций сейчас на паузе
+              </p>
+              <p className="mt-1 text-amber-100/90">
+                Новые авто-публикации не будут запускаться, пока вы не снимете паузу.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Content */}
         {loading ? (

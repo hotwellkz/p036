@@ -3,6 +3,7 @@ import { Loader2, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../stores/authStore";
 import TelegramIntegration from "../../components/TelegramIntegration";
+import GoogleDriveIntegration from "../../components/GoogleDriveIntegration";
 
 const AccountSettingsPage = () => {
   const { user } = useAuthStore((state) => ({ user: state.user }));
@@ -63,6 +64,10 @@ const AccountSettingsPage = () => {
 
           <div className="border-t border-white/10 pt-6">
             <TelegramIntegration />
+          </div>
+
+          <div className="border-t border-white/10 pt-6">
+            <GoogleDriveIntegration />
           </div>
         </div>
       </div>

@@ -512,6 +512,44 @@ async function markScheduleExecuted(
 /**
  * Основная функция планировщика - проверяет все каналы и запускает генерацию промптов
  */
+/**
+ * Получает настройки расписания для пользователя
+ */
+async function getScheduleSettingsForUser(userId: string): Promise<{ isAutomationPaused: boolean } | null> {
+  if (!isFirestoreAvailable() || !db) {
+    Logger.warn("Firestore is not available, cannot check automation pause status", { userId });
+    return null;
+  }
+
+  try {
+    const settingsRef = db
+      .collection("users")
+      .doc(userId)
+      .collection("settings")
+      .doc("schedule");
+    
+    const settingsSnap = await settingsRef.get();
+    
+    if (!settingsSnap.exists) {
+      // Настройки не найдены, возвращаем дефолтные (пауза выключена)
+      return { isAutomationPaused: false };
+    }
+
+    const data = settingsSnap.data();
+    return {
+      isAutomationPaused: typeof data?.isAutomationPaused === "boolean" 
+        ? data.isAutomationPaused 
+        : false
+    };
+  } catch (error: any) {
+    Logger.error("Failed to get schedule settings for user", {
+      userId,
+      error: error?.message || String(error)
+    });
+    return null;
+  }
+}
+
 export async function processAutoSendTick(): Promise<void> {
   const nowUtc = new Date();
   Logger.info("processAutoSendTick: start", { 
@@ -541,7 +579,43 @@ export async function processAutoSendTick(): Promise<void> {
     let triggeredCount = 0;
     let skippedCount = 0;
 
+    // Группируем каналы по пользователям для проверки паузы
+    const channelsByUser = new Map<string, ChannelWithSchedule[]>();
     for (const channel of channels) {
+      if (!channelsByUser.has(channel.ownerId)) {
+        channelsByUser.set(channel.ownerId, []);
+      }
+      channelsByUser.get(channel.ownerId)!.push(channel);
+    }
+
+    // Проверяем паузу для каждого пользователя
+    const userPauseStatus = new Map<string, boolean>();
+    for (const [userId, userChannels] of channelsByUser.entries()) {
+      const settings = await getScheduleSettingsForUser(userId);
+      const isPaused = settings?.isAutomationPaused === true;
+      userPauseStatus.set(userId, isPaused);
+      
+      if (isPaused) {
+        Logger.info("processAutoSendTick: automation is paused for user", {
+          userId,
+          channelsCount: userChannels.length,
+          channelIds: userChannels.map(c => c.id)
+        });
+        skippedCount += userChannels.length;
+      }
+    }
+
+    for (const channel of channels) {
+      // Проверяем паузу для пользователя этого канала
+      const isPaused = userPauseStatus.get(channel.ownerId) === true;
+      if (isPaused) {
+        Logger.info("processAutoSendTick: skipping channel (automation paused)", {
+          channelId: channel.id,
+          userId: channel.ownerId
+        });
+        continue;
+      }
+
       if (!channel.autoSendEnabled || !channel.autoSendSchedules) {
         Logger.info("processAutoSendTick: skipping channel (disabled or no schedules)", {
           channelId: channel.id,

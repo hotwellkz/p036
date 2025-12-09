@@ -333,15 +333,53 @@ export async function processNewFilesForChannel(channel: Channel): Promise<{
 }
 
 /**
+ * Получает настройки расписания для пользователя (проверка паузы автоматизации)
+ */
+async function getScheduleSettingsForUser(userId: string): Promise<{ isAutomationPaused: boolean } | null> {
+  if (!isFirestoreAvailable() || !db) {
+    Logger.warn("blottataDriveMonitor: Firestore is not available, cannot check automation pause status", { userId });
+    return null;
+  }
+
+  try {
+    const settingsRef = db
+      .collection("users")
+      .doc(userId)
+      .collection("settings")
+      .doc("schedule");
+    
+    const settingsSnap = await settingsRef.get();
+    
+    if (!settingsSnap.exists) {
+      // Настройки не найдены, возвращаем дефолтные (пауза выключена)
+      return { isAutomationPaused: false };
+    }
+
+    const data = settingsSnap.data();
+    return {
+      isAutomationPaused: typeof data?.isAutomationPaused === "boolean" 
+        ? data.isAutomationPaused 
+        : false
+    };
+  } catch (error: any) {
+    Logger.error("blottataDriveMonitor: Failed to get schedule settings for user", {
+      userId,
+      error: error?.message || String(error)
+    });
+    return null;
+  }
+}
+
+/**
  * Получает все каналы с включенной Blottata автоматизацией
  */
-export async function getChannelsWithBlottataEnabled(): Promise<Channel[]> {
+export async function getChannelsWithBlottataEnabled(): Promise<Array<Channel & { ownerId: string }>> {
   if (!isFirestoreAvailable() || !db) {
     Logger.warn("blottataDriveMonitor: Firestore is not available");
     return [];
   }
 
-  const channels: Channel[] = [];
+  const channels: Array<Channel & { ownerId: string }> = [];
 
   try {
     // Используем Collection Group Query для поиска всех каналов
@@ -350,14 +388,30 @@ export async function getChannelsWithBlottataEnabled(): Promise<Channel[]> {
     for (const doc of channelsSnapshot.docs) {
       const data = doc.data();
       
+      // Извлекаем userId из пути документа: users/{userId}/channels/{channelId}
+      const pathParts = doc.ref.path.split("/");
+      const userIdIndex = pathParts.indexOf("users");
+      const ownerId = userIdIndex !== -1 && userIdIndex + 1 < pathParts.length 
+        ? pathParts[userIdIndex + 1] 
+        : null;
+      
+      if (!ownerId) {
+        Logger.warn("blottataDriveMonitor: Could not extract userId from channel path", {
+          channelId: doc.id,
+          path: doc.ref.path
+        });
+        continue;
+      }
+      
       // Проверяем, включена ли Blottata автоматизация
       if (data.blotataEnabled === true && data.driveInputFolderId) {
-        const channel: Channel = {
+        const channel: Channel & { ownerId: string } = {
           id: doc.id,
+          ownerId,
           ...data,
           createdAt: data.createdAt || { seconds: 0, nanoseconds: 0 },
           updatedAt: data.updatedAt || { seconds: 0, nanoseconds: 0 }
-        } as Channel;
+        } as Channel & { ownerId: string };
 
         channels.push(channel);
       }
@@ -399,12 +453,51 @@ export async function processBlottataTick(): Promise<void> {
       channelsCount: channels.length
     });
 
+    // Группируем каналы по пользователям для проверки паузы
+    const channelsByUser = new Map<string, Array<Channel & { ownerId: string }>>();
+    for (const channel of channels) {
+      if (!channelsByUser.has(channel.ownerId)) {
+        channelsByUser.set(channel.ownerId, []);
+      }
+      channelsByUser.get(channel.ownerId)!.push(channel);
+    }
+
+    // Проверяем паузу для каждого пользователя
+    const userPauseStatus = new Map<string, boolean>();
+    for (const [userId, userChannels] of channelsByUser.entries()) {
+      const settings = await getScheduleSettingsForUser(userId);
+      const isPaused = settings?.isAutomationPaused === true;
+      userPauseStatus.set(userId, isPaused);
+      
+      if (isPaused) {
+        Logger.info("blottataDriveMonitor: Automation is paused for user", {
+          userId,
+          channelsCount: userChannels.length,
+          channelIds: userChannels.map(c => c.id)
+        });
+      }
+    }
+
     let totalProcessed = 0;
     let totalSkipped = 0;
     let totalErrors = 0;
+    let totalSkippedDueToPause = 0;
 
     // Обрабатываем каждый канал
     for (const channel of channels) {
+      // Проверяем паузу для пользователя этого канала
+      const isPaused = userPauseStatus.get(channel.ownerId) === true;
+      if (isPaused) {
+        Logger.info("blottataDriveMonitor: Channel skipped because automation is paused", {
+          channelId: channel.id,
+          channelName: channel.name,
+          userId: channel.ownerId,
+          folderId: channel.driveInputFolderId
+        });
+        totalSkippedDueToPause++;
+        continue;
+      }
+
       try {
         Logger.info("blottataDriveMonitor: Starting processing for channel", {
           channelId: channel.id,
@@ -452,6 +545,7 @@ export async function processBlottataTick(): Promise<void> {
     Logger.info("blottataDriveMonitor: Monitoring tick completed", {
       duration,
       channelsProcessed: channels.length,
+      channelsSkippedDueToPause: totalSkippedDueToPause,
       totalProcessed,
       totalSkipped,
       totalErrors

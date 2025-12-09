@@ -30,6 +30,7 @@ import telegramIntegrationRoutes from "./routes/telegramIntegrationRoutes";
 import cronRoutes from "./routes/cronRoutes";
 import promptRoutes from "./routes/promptRoutes";
 import googleDriveRoutes from "./routes/googleDriveRoutes";
+import googleDriveIntegrationRoutes from "./routes/googleDriveIntegrationRoutes";
 import debugRoutes from "./routes/debugRoutes";
 import testFirestoreRoutes from "./routes/testFirestoreRoutes";
 import authRoutes from "./routes/authRoutes";
@@ -87,12 +88,31 @@ app.use("/api/telegram-integration", telegramIntegrationRoutes);
 app.use("/api/cron", cronRoutes);
 app.use("/api/prompt", promptRoutes);
 app.use("/api/google-drive", googleDriveRoutes);
+app.use("/api/google-drive-integration", googleDriveIntegrationRoutes);
 app.use("/api/debug", debugRoutes);
 app.use("/api/test", testFirestoreRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/channels", channelRoutes);
 app.use("/api/schedule", scheduleRoutes);
 app.use("/api/notifications", notificationRoutes);
+
+// Логируем подключенные маршруты для диагностики
+Logger.info("Backend routes registered", {
+  routes: [
+    "/api/telegram",
+    "/api/telegram-integration",
+    "/api/cron",
+    "/api/prompt",
+    "/api/google-drive",
+    "/api/google-drive-integration",
+    "/api/debug",
+    "/api/test",
+    "/api/auth",
+    "/api/channels",
+    "/api/schedule",
+    "/api/notifications"
+  ]
+});
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });

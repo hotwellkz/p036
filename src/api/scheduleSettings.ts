@@ -10,6 +10,7 @@ export interface ScheduleSettings {
   minInterval_13_17?: number; // 13:00–17:00
   minInterval_17_24?: number; // 17:00–24:00
   conflictsCheckEnabled: boolean;
+  isAutomationPaused: boolean; // Пауза автоматизации публикаций
 }
 
 const DEFAULT_SETTINGS: ScheduleSettings = {
@@ -17,7 +18,8 @@ const DEFAULT_SETTINGS: ScheduleSettings = {
   minInterval_00_13: 11,
   minInterval_13_17: 11,
   minInterval_17_24: 11,
-  conflictsCheckEnabled: true
+  conflictsCheckEnabled: true,
+  isAutomationPaused: false
 };
 
 /**
@@ -95,7 +97,11 @@ export async function fetchScheduleSettings(): Promise<ScheduleSettings> {
       conflictsCheckEnabled:
         typeof data.conflictsCheckEnabled === "boolean"
           ? data.conflictsCheckEnabled
-          : DEFAULT_SETTINGS.conflictsCheckEnabled
+          : DEFAULT_SETTINGS.conflictsCheckEnabled,
+      isAutomationPaused:
+        typeof data.isAutomationPaused === "boolean"
+          ? data.isAutomationPaused
+          : DEFAULT_SETTINGS.isAutomationPaused
     };
   } catch {
     // При ошибке возвращаем значения по умолчанию
@@ -122,7 +128,8 @@ export async function updateScheduleSettings(
       minInterval_00_13: settings.minInterval_00_13,
       minInterval_13_17: settings.minInterval_13_17,
       minInterval_17_24: settings.minInterval_17_24,
-      conflictsCheckEnabled: settings.conflictsCheckEnabled
+      conflictsCheckEnabled: settings.conflictsCheckEnabled,
+      isAutomationPaused: settings.isAutomationPaused
     })
   });
 
@@ -146,7 +153,11 @@ export async function updateScheduleSettings(
       conflictsCheckEnabled:
         typeof data.conflictsCheckEnabled === "boolean"
           ? data.conflictsCheckEnabled
-          : DEFAULT_SETTINGS.conflictsCheckEnabled
+          : DEFAULT_SETTINGS.conflictsCheckEnabled,
+      isAutomationPaused:
+        typeof data.isAutomationPaused === "boolean"
+          ? data.isAutomationPaused
+          : DEFAULT_SETTINGS.isAutomationPaused
     };
 }
 

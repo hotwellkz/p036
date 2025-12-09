@@ -5,6 +5,8 @@ import { downloadTelegramVideoToTemp, cleanupTempFile } from "../utils/telegramD
 import { uploadFileToDrive } from "./googleDrive";
 import { uploadFileToDriveWithOAuth } from "./googleDriveOAuth";
 import { getUserOAuthTokens, updateUserAccessToken } from "../repositories/userOAuthTokensRepo";
+import { uploadFileToUserDrive } from "./googleDriveUserUploadService";
+import { findGoogleDriveIntegrationByUserId } from "../repositories/googleDriveIntegrationRepo";
 import { db, isFirestoreAvailable } from "./firebaseAdmin";
 import { Logger } from "../utils/logger";
 import { google } from "googleapis";
@@ -486,7 +488,7 @@ export async function downloadAndUploadVideoToDrive(
         fileName: driveFileName
       });
 
-      // Пробуем использовать OAuth токен пользователя, если доступен
+      // Определяем, какую интеграцию использовать: новую (googleDriveIntegrations) или старую (userOAuthTokens)
       Logger.info("downloadAndUploadVideoToDrive: starting Google Drive upload", {
         channelId,
         userId,
@@ -504,78 +506,35 @@ export async function downloadAndUploadVideoToDrive(
       });
 
       let driveResult;
-      let userTokens;
+      let userTokens: any = null;
       
       try {
-        userTokens = await getUserOAuthTokens(userId);
+        // Сначала проверяем новую интеграцию через googleDriveIntegrations
+        const googleDriveIntegration = await findGoogleDriveIntegrationByUserId(userId);
         
-        Logger.info("downloadAndUploadVideoToDrive: OAuth tokens check", {
-          userId,
-          hasAccessToken: !!userTokens?.googleDriveAccessToken,
-          hasRefreshToken: !!userTokens?.googleDriveRefreshToken,
-          tokenExpiry: userTokens?.googleDriveTokenExpiry 
-            ? new Date(userTokens.googleDriveTokenExpiry).toISOString() 
-            : "not set"
-        });
-        
-        if (userTokens?.googleDriveAccessToken) {
-          // Проверяем, не истёк ли токен
-          const now = Date.now();
-          const isExpired = userTokens.googleDriveTokenExpiry 
-            ? userTokens.googleDriveTokenExpiry < now 
-            : false;
-          
-          let accessToken = userTokens.googleDriveAccessToken;
-          
-          // Если токен истёк, обновляем его
-          if (isExpired && userTokens.googleDriveRefreshToken) {
-            Logger.info("downloadAndUploadVideoToDrive: OAuth token expired, refreshing", { 
-              userId,
-              expiryTime: new Date(userTokens.googleDriveTokenExpiry || 0).toISOString(),
-              currentTime: new Date().toISOString()
-            });
-            
-            const oauth2Client = new google.auth.OAuth2(
-              process.env.GOOGLE_OAUTH_CLIENT_ID,
-              process.env.GOOGLE_OAUTH_CLIENT_SECRET
-            );
-            oauth2Client.setCredentials({ refresh_token: userTokens.googleDriveRefreshToken });
-            
-            const { credentials } = await oauth2Client.refreshAccessToken();
-            accessToken = credentials.access_token!;
-            
-            // Сохраняем обновлённый токен
-            await updateUserAccessToken(
-              userId,
-              accessToken,
-              credentials.expiry_date || Date.now() + 3600000
-            );
-            
-            Logger.info("downloadAndUploadVideoToDrive: OAuth token refreshed successfully", { 
-              userId,
-              newExpiryTime: credentials.expiry_date 
-                ? new Date(credentials.expiry_date).toISOString() 
-                : "not set"
-            });
-          }
-          
-          // Используем OAuth токен для загрузки
-          Logger.info("downloadAndUploadVideoToDrive: using OAuth token for upload", { 
+        if (googleDriveIntegration && googleDriveIntegration.status === "active") {
+          // Используем новую систему интеграций
+          Logger.info("downloadAndUploadVideoToDrive: using new Google Drive integration", {
             userId,
-            folderId: finalFolderId,
-            fileName: driveFileName
+            integrationId: googleDriveIntegration.id,
+            email: googleDriveIntegration.email,
+            folderId: finalFolderId
           });
           
           try {
-            driveResult = await uploadFileToDriveWithOAuth({
-              filePath: tempFilePath,
-              fileName: driveFileName,
+            // Читаем файл в Buffer для новой функции
+            const fs = await import("fs");
+            const fileBuffer = await fs.promises.readFile(tempFilePath);
+            
+            driveResult = await uploadFileToUserDrive({
+              userId,
+              fileBuffer,
               mimeType: "video/mp4",
-              parentFolderId: finalFolderId,
-              accessToken: accessToken
+              fileName: driveFileName,
+              folderId: finalFolderId
             });
             
-            Logger.info("downloadAndUploadVideoToDrive: OAuth upload successful", {
+            Logger.info("downloadAndUploadVideoToDrive: new integration upload successful", {
               userId,
               fileId: driveResult.fileId,
               webViewLink: driveResult.webViewLink
@@ -585,21 +544,143 @@ export async function downloadAndUploadVideoToDrive(
               driveFileId: driveResult.fileId,
               webViewLink: driveResult.webViewLink,
               fileName: driveFileName,
+              method: "new_integration",
               timestamp: new Date().toISOString()
             });
-          } catch (oauthUploadError: any) {
-            Logger.error("downloadAndUploadVideoToDrive: OAuth upload failed", {
+          } catch (newIntegrationError: any) {
+            const errorMessage = String(newIntegrationError?.message || newIntegrationError);
+            const errorType = newIntegrationError?.errorType;
+            const errorCode = newIntegrationError?.code;
+            
+            Logger.error("downloadAndUploadVideoToDrive: new integration upload failed", {
               userId,
-              error: oauthUploadError?.message || String(oauthUploadError),
-              errorStack: oauthUploadError?.stack,
-              errorCode: oauthUploadError?.code,
-              folderId: finalFolderId
+              error: errorMessage,
+              errorType,
+              errorCode,
+              folderId: finalFolderId,
+              userEmail: newIntegrationError?.userEmail
             });
-            throw oauthUploadError;
+            
+            // Проверяем, является ли это ошибкой отсутствия интеграции
+            if (
+              errorMessage.includes("Google Drive integration not found") ||
+              errorMessage.includes("not active") ||
+              errorMessage.includes("Refresh token not available")
+            ) {
+              // Не пробрасываем ошибку дальше, пробуем fallback
+              Logger.warn("downloadAndUploadVideoToDrive: Google Drive integration not available, trying fallback", {
+                userId,
+                error: errorMessage
+              });
+              // Продолжаем выполнение, чтобы попробовать legacy OAuth или Service Account
+            } else if (
+              errorType === "FOLDER_ACCESS" ||
+              errorType === "FOLDER_NOT_FOUND" ||
+              errorType === "NOT_A_FOLDER" ||
+              errorMessage.includes("GOOGLE_DRIVE_FOLDER_NOT_FOUND") ||
+              errorMessage.includes("GOOGLE_DRIVE_PERMISSION_DENIED") ||
+              errorMessage.includes("GOOGLE_DRIVE_NOT_A_FOLDER")
+            ) {
+              // Ошибки доступа к папке - пробрасываем с структурированной информацией
+              const structuredError: any = new Error(errorMessage);
+              structuredError.errorType = errorType || "FOLDER_ACCESS";
+              structuredError.folderId = newIntegrationError?.folderId || finalFolderId;
+              structuredError.userEmail = newIntegrationError?.userEmail;
+              throw structuredError;
+            } else {
+              throw newIntegrationError;
+            }
           }
-        } else {
+        }
+        
+        // Если новая интеграция не сработала или не найдена, проверяем старую систему
+        if (!driveResult) {
+          // Fallback: проверяем старую систему (userOAuthTokens) для обратной совместимости
+          Logger.info("downloadAndUploadVideoToDrive: checking legacy OAuth tokens", { userId });
+          
+          userTokens = await getUserOAuthTokens(userId);
+          
+          if (userTokens?.googleDriveAccessToken) {
+            Logger.info("downloadAndUploadVideoToDrive: using legacy OAuth tokens", {
+              userId,
+              hasRefreshToken: !!userTokens.googleDriveRefreshToken,
+              tokenExpiry: userTokens.googleDriveTokenExpiry 
+                ? new Date(userTokens.googleDriveTokenExpiry).toISOString() 
+                : "not set"
+            });
+            
+            // Проверяем, не истёк ли токен
+            const now = Date.now();
+            const isExpired = userTokens.googleDriveTokenExpiry 
+              ? userTokens.googleDriveTokenExpiry < now 
+              : false;
+            
+            let accessToken = userTokens.googleDriveAccessToken;
+            
+            // Если токен истёк, обновляем его
+            if (isExpired && userTokens.googleDriveRefreshToken) {
+              Logger.info("downloadAndUploadVideoToDrive: legacy OAuth token expired, refreshing", { 
+                userId,
+                expiryTime: new Date(userTokens.googleDriveTokenExpiry || 0).toISOString()
+              });
+              
+              const oauth2Client = new google.auth.OAuth2(
+                process.env.GOOGLE_CLIENT_ID,
+                process.env.GOOGLE_CLIENT_SECRET
+              );
+              oauth2Client.setCredentials({ refresh_token: userTokens.googleDriveRefreshToken });
+              
+              const { credentials } = await oauth2Client.refreshAccessToken();
+              accessToken = credentials.access_token!;
+              
+              // Сохраняем обновлённый токен
+              await updateUserAccessToken(
+                userId,
+                accessToken,
+                credentials.expiry_date || Date.now() + 3600000
+              );
+              
+              Logger.info("downloadAndUploadVideoToDrive: legacy OAuth token refreshed", { userId });
+            }
+            
+            // Используем OAuth токен для загрузки через старую функцию
+            try {
+              driveResult = await uploadFileToDriveWithOAuth({
+                filePath: tempFilePath,
+                fileName: driveFileName,
+                mimeType: "video/mp4",
+                parentFolderId: finalFolderId,
+                accessToken: accessToken
+              });
+              
+              Logger.info("downloadAndUploadVideoToDrive: legacy OAuth upload successful", {
+                userId,
+                fileId: driveResult.fileId,
+                webViewLink: driveResult.webViewLink
+              });
+
+              console.log("UPLOAD_SUCCESS:", {
+                driveFileId: driveResult.fileId,
+                webViewLink: driveResult.webViewLink,
+                fileName: driveFileName,
+                method: "legacy_oauth",
+                timestamp: new Date().toISOString()
+              });
+            } catch (legacyOAuthError: any) {
+              Logger.error("downloadAndUploadVideoToDrive: legacy OAuth upload failed", {
+                userId,
+                error: legacyOAuthError?.message || String(legacyOAuthError),
+                errorCode: legacyOAuthError?.code
+              });
+              throw legacyOAuthError;
+            }
+          }
+        }
+        
+        // Если и legacy OAuth не сработал, используем Service Account
+        if (!driveResult) {
           // Fallback: используем Service Account (может не работать для загрузки)
-          Logger.warn("downloadAndUploadVideoToDrive: no OAuth token found, using Service Account", { 
+          Logger.warn("downloadAndUploadVideoToDrive: no user integration found, using Service Account", { 
             userId,
             folderId: finalFolderId
           });
@@ -635,144 +716,27 @@ export async function downloadAndUploadVideoToDrive(
             throw serviceAccountError;
           }
         }
-      } catch (uploadError: any) {
-        // Если OAuth не работает, пробуем Service Account как fallback
-        if (userTokens?.googleDriveAccessToken) {
-          // Если был OAuth токен, но загрузка не удалась, пробуем Service Account
-          Logger.warn("downloadAndUploadVideoToDrive: OAuth upload failed, trying Service Account fallback", {
-            error: uploadError?.message,
-            userId,
-            folderId: finalFolderId
-          });
-          
-          try {
-            driveResult = await uploadFileToDrive({
-              filePath: tempFilePath,
-              fileName: driveFileName,
-              mimeType: "video/mp4",
-              parentFolderId: finalFolderId
-            });
-            
-            Logger.info("downloadAndUploadVideoToDrive: Service Account fallback upload successful", {
-              userId,
-              fileId: driveResult.fileId
-            });
-
-            console.log("UPLOAD_SUCCESS:", {
-              driveFileId: driveResult.fileId,
-              webViewLink: driveResult.webViewLink,
-              fileName: driveFileName,
-              timestamp: new Date().toISOString()
-            });
-          } catch (serviceAccountError: any) {
-            // Если и Service Account не работает, пробрасываем ошибку
-            Logger.error("downloadAndUploadVideoToDrive: both OAuth and Service Account uploads failed", {
-              userId,
-              oauthError: uploadError?.message,
-              serviceAccountError: serviceAccountError?.message,
-              folderId: finalFolderId
-            });
-            
-            // Создаём уведомление об ошибке загрузки
-            try {
-              let timeSlot: string | undefined;
-              if (scheduleId) {
-                try {
-                  const scheduleDoc = await channelRef.collection("autoSendSchedules").doc(scheduleId).get();
-                  if (scheduleDoc.exists) {
-                    const scheduleData = scheduleDoc.data();
-                    timeSlot = scheduleData?.time || undefined;
-                  }
-                } catch {
-                  // ignore
-                }
-              }
-
-              await notificationRepository.create({
-                userId,
-                channelId,
-                type: "video_upload_failed",
-                title: "Ошибка загрузки видео на Google Drive",
-                message: `Канал: ${channelData.name || channelId}${timeSlot ? `, слот ${timeSlot}` : ""}, файл: ${driveFileName}. ${serviceAccountError?.message || uploadError?.message || "Не удалось загрузить файл"}`,
-                status: "error",
-                isRead: false,
-                metadata: {
-                  fileName: driveFileName,
-                  scheduleId: scheduleId || undefined,
-                  timeSlot,
-                  errorDetails: serviceAccountError?.message || uploadError?.message || String(uploadError)
-                }
-              });
-            } catch (notificationError) {
-              Logger.error("Failed to create upload error notification", {
-                error: notificationError instanceof Error ? notificationError.message : String(notificationError)
-              });
-            }
-
-            throw new Error(
-              `GOOGLE_DRIVE_UPLOAD_FAILED: Не удалось загрузить файл в Google Drive. ` +
-              `OAuth ошибка: ${uploadError?.message || String(uploadError)}. ` +
-              `Service Account ошибка: ${serviceAccountError?.message || String(serviceAccountError)}. ` +
-              `Проверьте права доступа к папке (ID: ${finalFolderId}) и авторизуйтесь через Google OAuth: http://localhost:8080/api/auth/google`
-            );
-          }
-        } else {
-          // Создаём уведомление об ошибке загрузки (только OAuth)
-          try {
-            let timeSlot: string | undefined;
-            if (scheduleId) {
-              try {
-                const scheduleDoc = await channelRef.collection("autoSendSchedules").doc(scheduleId).get();
-                if (scheduleDoc.exists) {
-                  const scheduleData = scheduleDoc.data();
-                  timeSlot = scheduleData?.time || undefined;
-                }
-              } catch {
-                // ignore
-              }
-            }
-
-            await notificationRepository.create({
-              userId,
-              channelId,
-              type: "video_upload_failed",
-              title: "Ошибка загрузки видео на Google Drive",
-              message: `Канал: ${channelData.name || channelId}${timeSlot ? `, слот ${timeSlot}` : ""}, файл: ${driveFileName}. ${uploadError?.message || "Не удалось загрузить файл"}`,
-              status: "error",
-              isRead: false,
-              metadata: {
-                fileName: driveFileName,
-                scheduleId: scheduleId || undefined,
-                timeSlot,
-                errorDetails: uploadError?.message || String(uploadError)
-              }
-            });
-          } catch (notificationError) {
-            Logger.error("Failed to create upload error notification", {
-              error: notificationError instanceof Error ? notificationError.message : String(notificationError)
-            });
-          }
-
-          // Если не было OAuth токена, ошибка уже проброшена выше
-          throw uploadError;
+        
+        // Если загрузка успешна, продолжаем обработку
+        if (!driveResult) {
+          throw new Error("GOOGLE_DRIVE_UPLOAD_FAILED: Не удалось загрузить файл в Google Drive. Все методы загрузки не сработали.");
         }
-      }
+        
+        Logger.info("downloadAndUploadVideoToDrive: File uploaded to Google Drive successfully", {
+          channelId,
+          userId,
+          telegramMessageId,
+          fileId: driveResult.fileId,
+          fileName: driveFileName,
+          webViewLink: driveResult.webViewLink,
+          folderId: finalFolderId,
+          scheduleId: scheduleId || "manual",
+          uploadedAt: new Date().toISOString()
+        });
 
-      Logger.info("downloadAndUploadVideoToDrive: File uploaded to Google Drive successfully", {
-        channelId,
-        userId,
-        telegramMessageId,
-        fileId: driveResult.fileId,
-        fileName: driveFileName,
-        webViewLink: driveResult.webViewLink,
-        folderId: finalFolderId,
-        scheduleId: scheduleId || "manual",
-        uploadedAt: new Date().toISOString()
-      });
-
-      // Уведомления в Telegram (если включены)
-      try {
-        if (channelData.uploadNotificationEnabled === true) {
+        // Уведомления в Telegram (если включены)
+        try {
+          if (channelData.uploadNotificationEnabled === true) {
           // Определяем chatId для уведомления:
           // 1. Если указан uploadNotificationChatId - используем его
           // 2. Если нет, но есть telegramSyntaxPeer - используем его (для совместимости с предыдущей логикой)
@@ -836,169 +800,294 @@ export async function downloadAndUploadVideoToDrive(
         }
       }
 
-      // Шаг 3: Удаляем временный файл
-      Logger.info("Step 3: Cleaning up temporary file", {
-        tempPath: tempFilePath
-      });
-
-      await cleanupTempFile(tempFilePath);
-      tempFilePath = null; // Помечаем, что файл удалён
-
-      // Шаг 4: Сохраняем информацию о видео в Firestore
-      try {
-        // Сохраняем в generatedVideos
-        await channelRef.collection("generatedVideos").add({
-          driveFileId: driveResult.fileId,
-          driveWebViewLink: driveResult.webViewLink || null,
-          driveWebContentLink: driveResult.webContentLink || null,
-          createdAt: new Date(),
-          source: scheduleId ? "auto-scheduled" : "manual",
-          telegramMessageId: downloadResult.messageId,
-          scheduleId: scheduleId || null,
-          fileName: driveFileName
+        // Шаг 3: Удаляем временный файл
+        Logger.info("Step 3: Cleaning up temporary file", {
+          tempPath: tempFilePath
         });
 
-        // Обновляем videoGenerations, если есть запись с таким messageId
-        // ВАЖНО: Обновляем uploadedToDrive и driveFileId для идемпотентности
-        if (telegramMessageId) {
-          const generationQuery = await channelRef
-            .collection("videoGenerations")
-            .where("messageId", "==", telegramMessageId)
-            .limit(1)
-            .get();
+        await cleanupTempFile(tempFilePath);
+        tempFilePath = null; // Помечаем, что файл удалён
 
-          if (!generationQuery.empty) {
-            const generationDoc = generationQuery.docs[0];
-            const updateData = {
-              uploadedToDrive: true,
-              driveFileId: driveResult.fileId,
-              driveWebViewLink: driveResult.webViewLink || null,
-              driveWebContentLink: driveResult.webContentLink || null,
-              uploadedAt: new Date(),
-              fileName: driveFileName,
-              status: "completed" // Обновляем статус на completed
-            };
-            
-            await generationDoc.ref.update(updateData);
+        // Шаг 4: Сохраняем информацию о видео в Firestore
+        try {
+          // Сохраняем в generatedVideos
+          await channelRef.collection("generatedVideos").add({
+            driveFileId: driveResult.fileId,
+            driveWebViewLink: driveResult.webViewLink || null,
+            driveWebContentLink: driveResult.webContentLink || null,
+            createdAt: new Date(),
+            source: scheduleId ? "auto-scheduled" : "manual",
+            telegramMessageId: downloadResult.messageId,
+            scheduleId: scheduleId || null,
+            fileName: driveFileName
+          });
 
-            Logger.info("downloadAndUploadVideoToDrive: updated videoGenerations with upload info", {
-              channelId,
-              userId,
-              telegramMessageId,
-              generationId: generationDoc.id,
-              driveFileId: driveResult.fileId,
-              uploadedToDrive: true
-            });
-          } else {
-            // Если записи нет, создаём новую для истории
-            try {
-              await channelRef.collection("videoGenerations").add({
-                messageId: telegramMessageId,
+          // Обновляем videoGenerations, если есть запись с таким messageId
+          // ВАЖНО: Обновляем uploadedToDrive и driveFileId для идемпотентности
+          if (telegramMessageId) {
+            const generationQuery = await channelRef
+              .collection("videoGenerations")
+              .where("messageId", "==", telegramMessageId)
+              .limit(1)
+              .get();
+
+            if (!generationQuery.empty) {
+              const generationDoc = generationQuery.docs[0];
+              const updateData = {
                 uploadedToDrive: true,
                 driveFileId: driveResult.fileId,
                 driveWebViewLink: driveResult.webViewLink || null,
                 driveWebContentLink: driveResult.webContentLink || null,
                 uploadedAt: new Date(),
                 fileName: driveFileName,
-                status: "completed",
-                createdAt: new Date()
-              });
+                status: "completed" // Обновляем статус на completed
+              };
               
-              Logger.info("downloadAndUploadVideoToDrive: created new videoGenerations record", {
+              await generationDoc.ref.update(updateData);
+
+              Logger.info("downloadAndUploadVideoToDrive: updated videoGenerations with upload info", {
                 channelId,
                 userId,
                 telegramMessageId,
-                driveFileId: driveResult.fileId
+                generationId: generationDoc.id,
+                driveFileId: driveResult.fileId,
+                uploadedToDrive: true
               });
-            } catch (createError) {
-              Logger.warn("downloadAndUploadVideoToDrive: failed to create videoGenerations record", {
-                channelId,
-                userId,
-                telegramMessageId,
-                error: String(createError)
+            } else {
+              // Если записи нет, создаём новую для истории
+              try {
+                await channelRef.collection("videoGenerations").add({
+                  messageId: telegramMessageId,
+                  uploadedToDrive: true,
+                  driveFileId: driveResult.fileId,
+                  driveWebViewLink: driveResult.webViewLink || null,
+                  driveWebContentLink: driveResult.webContentLink || null,
+                  uploadedAt: new Date(),
+                  fileName: driveFileName,
+                  status: "completed",
+                  createdAt: new Date()
+                });
+                
+                Logger.info("downloadAndUploadVideoToDrive: created new videoGenerations record", {
+                  channelId,
+                  userId,
+                  telegramMessageId,
+                  driveFileId: driveResult.fileId
+                });
+              } catch (createError) {
+                Logger.warn("downloadAndUploadVideoToDrive: failed to create videoGenerations record", {
+                  channelId,
+                  userId,
+                  telegramMessageId,
+                  error: String(createError)
+                });
+              }
+            }
+          }
+
+          // Обновляем последнее видео в канале (опционально)
+          await channelRef.update({
+            lastVideoDriveFileId: driveResult.fileId,
+            lastVideoDriveLink: driveResult.webViewLink || null,
+            lastVideoUpdatedAt: new Date()
+          });
+
+          Logger.info("downloadAndUploadVideoToDrive: video info saved to Firestore", {
+            channelId,
+            userId,
+            telegramMessageId: downloadResult.messageId,
+            driveFileId: driveResult.fileId
+          });
+        } catch (firestoreError) {
+          Logger.warn("Failed to save video info to Firestore", {
+            error: String(firestoreError),
+            channelId,
+            userId,
+            telegramMessageId: downloadResult.messageId
+          });
+          // Не прерываем выполнение, так как файл уже загружен
+        }
+
+        Logger.info("Video successfully processed and uploaded to Google Drive", {
+          fileId: driveResult.fileId,
+          webViewLink: driveResult.webViewLink,
+          scheduleId: scheduleId || "manual"
+        });
+
+        // Создаём уведомление об успешной загрузке
+        try {
+          // Получаем информацию о времени слота, если есть scheduleId
+          let timeSlot: string | undefined;
+          if (scheduleId) {
+            try {
+              const scheduleDoc = await channelRef.collection("autoSendSchedules").doc(scheduleId).get();
+              if (scheduleDoc.exists) {
+                const scheduleData = scheduleDoc.data();
+                timeSlot = scheduleData?.time || undefined;
+              }
+            } catch (scheduleError) {
+              Logger.warn("Failed to fetch schedule info for notification", {
+                scheduleId,
+                error: String(scheduleError)
               });
             }
           }
+
+          await notificationRepository.create({
+            userId,
+            channelId,
+            type: "video_uploaded",
+            title: "Видео загружено на Google Drive",
+            message: `Канал: ${channelData.name || channelId}${timeSlot ? `, слот ${timeSlot}` : ""}, файл: ${driveFileName}`,
+            status: "success",
+            isRead: false,
+            driveFileUrl: driveResult.webViewLink || driveResult.webContentLink,
+            metadata: {
+              fileName: driveFileName,
+              scheduleId: scheduleId || undefined,
+              timeSlot
+            }
+          });
+        } catch (notificationError) {
+          // Ошибки при создании уведомления не должны ломать процесс
+          Logger.error("Failed to create success notification", {
+            error: notificationError instanceof Error ? notificationError.message : String(notificationError),
+            userId,
+            channelId
+          });
         }
 
-        // Обновляем последнее видео в канале (опционально)
-        await channelRef.update({
-          lastVideoDriveFileId: driveResult.fileId,
-          lastVideoDriveLink: driveResult.webViewLink || null,
-          lastVideoUpdatedAt: new Date()
-        });
-
-        Logger.info("downloadAndUploadVideoToDrive: video info saved to Firestore", {
-          channelId,
+        return {
+          success: true,
+          driveFileId: driveResult.fileId,
+          driveWebViewLink: driveResult.webViewLink,
+          driveWebContentLink: driveResult.webContentLink,
+          fileName: driveFileName
+        };
+      } catch (uploadError: any) {
+        // Обработка ошибок загрузки в Google Drive
+        const errorMessage = String(uploadError?.message || uploadError);
+        const errorType = uploadError?.errorType;
+        const folderId = uploadError?.folderId || finalFolderId;
+        const userEmail = uploadError?.userEmail;
+        
+        Logger.error("downloadAndUploadVideoToDrive: upload error in catch block", {
           userId,
-          telegramMessageId: downloadResult.messageId,
-          driveFileId: driveResult.fileId
+          error: errorMessage,
+          errorType,
+          folderId,
+          userEmail,
+          errorCode: uploadError?.code
         });
-      } catch (firestoreError) {
-        Logger.warn("Failed to save video info to Firestore", {
-          error: String(firestoreError),
-          channelId,
-          userId,
-          telegramMessageId: downloadResult.messageId
-        });
-        // Не прерываем выполнение, так как файл уже загружен
+        
+        // Проверяем, является ли это ошибкой отсутствия интеграции
+        if (
+          errorMessage.includes("Google Drive integration not found") ||
+          errorMessage.includes("not active") ||
+          errorMessage.includes("Refresh token not available") ||
+          errorMessage.includes("GOOGLE_DRIVE_NOT_CONNECTED")
+        ) {
+          const error = new Error(
+            `GOOGLE_DRIVE_NOT_CONNECTED: Google Drive не подключён. Подключите его в настройках аккаунта.`
+          );
+          (error as any).errorType = "NOT_CONNECTED";
+          throw error;
+        }
+        
+        // Обработка ошибок доступа к папке
+        if (
+          errorType === "FOLDER_ACCESS" ||
+          errorType === "FOLDER_NOT_FOUND" ||
+          errorType === "NOT_A_FOLDER" ||
+          errorMessage.includes("GOOGLE_DRIVE_FOLDER_NOT_FOUND") ||
+          errorMessage.includes("GOOGLE_DRIVE_PERMISSION_DENIED") ||
+          errorMessage.includes("GOOGLE_DRIVE_NOT_A_FOLDER")
+        ) {
+          const error = new Error(errorMessage);
+          (error as any).errorType = errorType || "FOLDER_ACCESS";
+          (error as any).folderId = folderId;
+          (error as any).userEmail = userEmail;
+          throw error;
+        }
+        
+        // Для других ошибок пробрасываем дальше
+        throw uploadError;
       }
+    } catch (err: any) {
+      const errorMessage = String(err?.message ?? err);
+      const errorStack = err?.stack;
 
-      Logger.info("Video successfully processed and uploaded to Google Drive", {
-        fileId: driveResult.fileId,
-        webViewLink: driveResult.webViewLink,
-        scheduleId: scheduleId || "manual"
+      Logger.error("Error in downloadAndUploadVideoToDrive", {
+        error: errorMessage,
+        stack: errorStack,
+        userId,
+        channelId,
+        tempFilePath,
+        scheduleId
       });
 
-      // Создаём уведомление об успешной загрузке
-      try {
-        // Получаем информацию о времени слота, если есть scheduleId
-        let timeSlot: string | undefined;
-        if (scheduleId) {
-          try {
-            const scheduleDoc = await channelRef.collection("autoSendSchedules").doc(scheduleId).get();
-            if (scheduleDoc.exists) {
-              const scheduleData = scheduleDoc.data();
-              timeSlot = scheduleData?.time || undefined;
+      // Создаём уведомление об общей ошибке автоматизации (если ещё не создано)
+      // Проверяем, что это не ошибка скачивания или загрузки (они уже обработаны выше)
+      if (!errorMessage.includes("VIDEO_DOWNLOAD_FAILED") && !errorMessage.includes("GOOGLE_DRIVE_UPLOAD_FAILED")) {
+        try {
+          if (isFirestoreAvailable() && db) {
+            const channelRef = db
+              .collection("users")
+              .doc(userId)
+              .collection("channels")
+              .doc(channelId);
+            const channelSnap = await channelRef.get();
+            const channelData = channelSnap.exists ? channelSnap.data() : null;
+
+            let timeSlot: string | undefined;
+            if (scheduleId) {
+              try {
+                const scheduleDoc = await channelRef.collection("autoSendSchedules").doc(scheduleId).get();
+                if (scheduleDoc.exists) {
+                  const scheduleData = scheduleDoc.data();
+                  timeSlot = scheduleData?.time || undefined;
+                }
+              } catch {
+                // ignore
+              }
             }
-          } catch (scheduleError) {
-            Logger.warn("Failed to fetch schedule info for notification", {
-              scheduleId,
-              error: String(scheduleError)
+
+            await notificationRepository.create({
+              userId,
+              channelId,
+              type: "automation_error",
+              title: "Ошибка автоматизации",
+              message: `Канал: ${channelData?.name || channelId}${timeSlot ? `, слот ${timeSlot}` : ""}. ${errorMessage}`,
+              status: "error",
+              isRead: false,
+              metadata: {
+                scheduleId: scheduleId || undefined,
+                timeSlot,
+                errorDetails: errorMessage
+              }
             });
           }
+        } catch (notificationError) {
+          Logger.error("Failed to create automation error notification", {
+            error: notificationError instanceof Error ? notificationError.message : String(notificationError)
+          });
         }
+      }
 
-        await notificationRepository.create({
-          userId,
-          channelId,
-          type: "video_uploaded",
-          title: "Видео загружено на Google Drive",
-          message: `Канал: ${channelData.name || channelId}${timeSlot ? `, слот ${timeSlot}` : ""}, файл: ${driveFileName}`,
-          status: "success",
-          isRead: false,
-          driveFileUrl: driveResult.webViewLink || driveResult.webContentLink,
-          metadata: {
-            fileName: driveFileName,
-            scheduleId: scheduleId || undefined,
-            timeSlot
-          }
-        });
-      } catch (notificationError) {
-        // Ошибки при создании уведомления не должны ломать процесс
-        Logger.error("Failed to create success notification", {
-          error: notificationError instanceof Error ? notificationError.message : String(notificationError),
-          userId,
-          channelId
+      // Удаляем временный файл в случае ошибки
+      if (tempFilePath) {
+        Logger.warn("Cleaning up temp file after error", { tempFilePath });
+        await cleanupTempFile(tempFilePath).catch((cleanupError) => {
+          Logger.error("Failed to cleanup temp file after error", {
+            tempPath: tempFilePath,
+            error: String(cleanupError)
+          });
         });
       }
 
       return {
-        success: true,
-        driveFileId: driveResult.fileId,
-        driveWebViewLink: driveResult.webViewLink,
-        driveWebContentLink: driveResult.webContentLink,
-        fileName: driveFileName
+        success: false,
+        error: errorMessage
       };
     } finally {
       // Отключаемся от Telegram
@@ -1010,81 +1099,33 @@ export async function downloadAndUploadVideoToDrive(
         // ignore
       }
     }
-  } catch (err: any) {
-    const errorMessage = String(err?.message ?? err);
-    const errorStack = err?.stack;
-
-    Logger.error("Error in downloadAndUploadVideoToDrive", {
-      error: errorMessage,
-      stack: errorStack,
+  } catch (outerError: any) {
+    // Обработка ошибок на верхнем уровне
+    Logger.error("downloadAndUploadVideoToDrive: outer error", {
+      error: String(outerError?.message ?? outerError),
       userId,
-      channelId,
-      tempFilePath,
-      scheduleId
+      channelId
     });
-
-    // Создаём уведомление об общей ошибке автоматизации (если ещё не создано)
-    // Проверяем, что это не ошибка скачивания или загрузки (они уже обработаны выше)
-    if (!errorMessage.includes("VIDEO_DOWNLOAD_FAILED") && !errorMessage.includes("GOOGLE_DRIVE_UPLOAD_FAILED")) {
-      try {
-        if (isFirestoreAvailable() && db) {
-          const channelRef = db
-            .collection("users")
-            .doc(userId)
-            .collection("channels")
-            .doc(channelId);
-          const channelSnap = await channelRef.get();
-          const channelData = channelSnap.exists ? channelSnap.data() : null;
-
-          let timeSlot: string | undefined;
-          if (scheduleId) {
-            try {
-              const scheduleDoc = await channelRef.collection("autoSendSchedules").doc(scheduleId).get();
-              if (scheduleDoc.exists) {
-                const scheduleData = scheduleDoc.data();
-                timeSlot = scheduleData?.time || undefined;
-              }
-            } catch {
-              // ignore
-            }
-          }
-
-          await notificationRepository.create({
-            userId,
-            channelId,
-            type: "automation_error",
-            title: "Ошибка автоматизации",
-            message: `Канал: ${channelData?.name || channelId}${timeSlot ? `, слот ${timeSlot}` : ""}. ${errorMessage}`,
-            status: "error",
-            isRead: false,
-            metadata: {
-              scheduleId: scheduleId || undefined,
-              timeSlot,
-              errorDetails: errorMessage
-            }
-          });
-        }
-      } catch (notificationError) {
-        Logger.error("Failed to create automation error notification", {
-          error: notificationError instanceof Error ? notificationError.message : String(notificationError)
-        });
-      }
-    }
-
+    
     // Удаляем временный файл в случае ошибки
     if (tempFilePath) {
-      Logger.warn("Cleaning up temp file after error", { tempFilePath });
-      await cleanupTempFile(tempFilePath).catch((cleanupError) => {
-        Logger.error("Failed to cleanup temp file after error", {
-          tempPath: tempFilePath,
-          error: String(cleanupError)
-        });
+      await cleanupTempFile(tempFilePath).catch(() => {
+        // ignore
       });
     }
-
+    
+    // Отключаемся от Telegram
+    if (telegramClient) {
+      try {
+        await telegramClient.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    
     return {
       success: false,
-      error: errorMessage
+      error: String(outerError?.message ?? outerError)
     };
   }
 }

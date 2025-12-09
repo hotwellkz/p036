@@ -347,11 +347,11 @@ const AIAutoGenerateModal = ({
         videoTitle || undefined // Передаём название ролика для имени файла
       );
 
-      if (result.status === "ok") {
+      if (result.status === "ok" || result.status === "success" || result.success === true) {
         setDriveStatus("success");
         const webViewLink = result.driveWebViewLink || result.webViewLink;
         setDriveWebViewLink(webViewLink || null);
-        setDriveMessage("Видео успешно загружено в Google Drive");
+        setDriveMessage("🟢 Видео успешно загружено в Google Drive");
       } else {
         setDriveStatus("error");
         setDriveMessage(
@@ -363,12 +363,18 @@ const AIAutoGenerateModal = ({
       setDriveStatus("error");
       
       const errorCode = err?.response?.data?.code || err?.response?.data?.error;
+      const errorType = err?.response?.data?.errorType;
       const errorMessage = err?.response?.data?.message || err?.message;
+      const folderId = err?.response?.data?.folderId;
+      const userEmail = err?.response?.data?.userEmail;
       
       console.error("Ошибка при загрузке видео в Google Drive:", {
         status: err?.response?.status,
         errorCode,
+        errorType,
         errorMessage,
+        folderId,
+        userEmail,
         fullError: err
       });
       
@@ -380,6 +386,45 @@ const AIAutoGenerateModal = ({
         );
         // Сохраняем флаг для показа кнопки перехода в настройки
         setDriveStatus("telegram_session_invalid");
+        return;
+      }
+      
+      // Обработка ошибки требования переавторизации
+      if (
+        errorType === "GOOGLE_DRIVE_REAUTH_REQUIRED" ||
+        errorMessage?.includes("GOOGLE_DRIVE_REAUTH_REQUIRED")
+      ) {
+        setDriveMessage(
+          "🔴 Необходимо заново подключить Google Drive для обновления прав доступа. Перейдите в настройки аккаунта и переподключите Google Drive."
+        );
+        setDriveStatus("error");
+        return;
+      }
+
+      // Обработка ошибок доступа к Google Drive папке
+      if (
+        errorType === "FOLDER_ACCESS" ||
+        errorType === "FOLDER_NOT_FOUND" ||
+        errorType === "NOT_A_FOLDER" ||
+        errorMessage?.includes("GOOGLE_DRIVE_FOLDER_NOT_FOUND") ||
+        errorMessage?.includes("GOOGLE_DRIVE_PERMISSION_DENIED") ||
+        errorMessage?.includes("GOOGLE_DRIVE_NOT_A_FOLDER")
+      ) {
+        let message = "🔴 Папка недоступна. Проверьте ID и доступы в Google Drive.";
+        
+        if (errorType === "NOT_A_FOLDER" || errorMessage?.includes("GOOGLE_DRIVE_NOT_A_FOLDER")) {
+          message = `🔴 Указанный ID не является папкой Google Drive (ID: ${folderId || "не указан"}). Проверьте правильность ID в настройках канала.`;
+        } else if (errorType === "FOLDER_NOT_FOUND" || errorMessage?.includes("GOOGLE_DRIVE_FOLDER_NOT_FOUND")) {
+          message = `🔴 Папка не найдена (ID: ${folderId || "не указан"}). Проверьте правильность ID папки в настройках канала.`;
+        } else if (errorType === "FOLDER_ACCESS" || errorMessage?.includes("GOOGLE_DRIVE_PERMISSION_DENIED")) {
+          if (userEmail) {
+            message = `🔴 Google Drive: у текущего Google-аккаунта (${userEmail}) нет доступа к этой папке (ID: ${folderId || "не указан"}). Откройте доступ к папке для этого email с правами "Редактор" или укажите другой Folder ID.`;
+          } else {
+            message = `🔴 Google Drive: у текущего Google-аккаунта нет доступа к этой папке. Откройте доступ к папке для email, который указан в логах сервера (about.user.emailAddress), или укажите другой Folder ID.`;
+          }
+        }
+        
+        setDriveMessage(message);
         return;
       }
       

@@ -16,6 +16,7 @@ import ScriptGenerationPage from "./pages/ScriptGeneration/ScriptGenerationPage"
 import PrivacyPolicy from "./pages/PrivacyPolicy/PrivacyPolicy";
 import AccountSettingsPage from "./pages/AccountSettings/AccountSettingsPage";
 import NotificationsPage from "./pages/Notifications/NotificationsPage";
+import GoogleDriveCallbackPage from "./pages/GoogleDriveCallback/GoogleDriveCallbackPage";
 import { useAuthStore } from "./stores/authStore";
 
 const FullscreenLoader = () => (
@@ -86,6 +87,14 @@ const AppRouter = () => {
         element={
           <PrivateRoute>
             <AccountSettingsPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/google-drive/callback"
+        element={
+          <PrivateRoute>
+            <GoogleDriveCallbackPage />
           </PrivateRoute>
         }
       />

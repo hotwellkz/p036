@@ -645,8 +645,60 @@ router.post("/fetchLatestVideoToDrive", authRequired, async (req, res) => {
     const errorClassName = err?.className;
     const errorErrorCode = err?.error_code;
     const errorErrorMessage = err?.error_message;
+    const errorType = err?.errorType;
+    const folderId = err?.folderId;
+    const userEmail = err?.userEmail;
     
-    // Детальное логирование реальной ошибки
+    // Обработка ошибки требования переавторизации
+    if (
+      errorType === "GOOGLE_DRIVE_REAUTH_REQUIRED" ||
+      errorMessage.includes("GOOGLE_DRIVE_REAUTH_REQUIRED")
+    ) {
+      Logger.error("Error in /api/telegram/fetchLatestVideoToDrive - REAUTH_REQUIRED", {
+        userId,
+        channelId,
+        errorType,
+        folderId,
+        userEmail,
+        error: errorMessage
+      });
+      
+      return res.status(400).json({
+        success: false,
+        errorType: "GOOGLE_DRIVE_REAUTH_REQUIRED",
+        message: errorMessage || "Необходимо заново подключить Google Drive для обновления прав доступа.",
+        folderId: folderId || undefined,
+        userEmail: userEmail || undefined
+      });
+    }
+    
+    // Обработка ошибок доступа к Google Drive папке
+    if (
+      errorType === "FOLDER_ACCESS" ||
+      errorType === "FOLDER_NOT_FOUND" ||
+      errorType === "NOT_A_FOLDER" ||
+      errorMessage.includes("GOOGLE_DRIVE_FOLDER_NOT_FOUND") ||
+      errorMessage.includes("GOOGLE_DRIVE_PERMISSION_DENIED") ||
+      errorMessage.includes("GOOGLE_DRIVE_NOT_A_FOLDER")
+    ) {
+      Logger.error("Error in /api/telegram/fetchLatestVideoToDrive - FOLDER_ACCESS_ERROR", {
+        userId,
+        channelId,
+        errorType,
+        folderId,
+        userEmail,
+        error: errorMessage
+      });
+      
+      return res.status(400).json({
+        success: false,
+        errorType: errorType || "FOLDER_ACCESS",
+        message: errorMessage,
+        folderId: folderId || undefined,
+        userEmail: userEmail || undefined
+      });
+    }
+    
     Logger.error("Error in /api/telegram/fetchLatestVideoToDrive - ДЕТАЛЬНАЯ ИНФОРМАЦИЯ", {
       error: errorMessage,
       errorCode,
@@ -991,14 +1043,63 @@ router.post("/fetchVideoAndUploadToDrive", authRequired, async (req, res) => {
     }
   } catch (err: any) {
     const errorMessage = String(err?.message ?? err);
+    const errorType = err?.errorType;
+    const folderId = err?.folderId;
+    const userEmail = err?.userEmail;
+    
     Logger.error("Error in /api/telegram/fetchVideoAndUploadToDrive", {
       error: errorMessage,
+      errorType,
+      folderId,
+      userEmail,
       userId,
       channelId
     });
 
+        // Обработка ошибки требования переавторизации
+        if (
+          errorType === "GOOGLE_DRIVE_REAUTH_REQUIRED" ||
+          errorMessage.includes("GOOGLE_DRIVE_REAUTH_REQUIRED")
+        ) {
+          return res.status(400).json({
+            success: false,
+            errorType: "GOOGLE_DRIVE_REAUTH_REQUIRED",
+            message: errorMessage || "Необходимо заново подключить Google Drive для обновления прав доступа.",
+            folderId: folderId || undefined,
+            userEmail: userEmail || undefined
+          });
+        }
+
+        // Обработка ошибок доступа к Google Drive папке
+        if (
+          errorType === "FOLDER_ACCESS" ||
+          errorType === "FOLDER_NOT_FOUND" ||
+          errorType === "NOT_A_FOLDER" ||
+          errorMessage.includes("GOOGLE_DRIVE_FOLDER_NOT_FOUND") ||
+          errorMessage.includes("GOOGLE_DRIVE_PERMISSION_DENIED") ||
+          errorMessage.includes("GOOGLE_DRIVE_NOT_A_FOLDER")
+        ) {
+          return res.status(400).json({
+            success: false,
+            errorType: errorType || "FOLDER_ACCESS",
+            message: errorMessage,
+            folderId: folderId || undefined,
+            userEmail: userEmail || undefined
+          });
+        }
+    
+    // Обработка ошибок Telegram сессии
+    if (errorMessage.includes("TELEGRAM_SESSION_INVALID")) {
+      return res.status(400).json({
+        error: "TELEGRAM_SESSION_INVALID",
+        code: "TELEGRAM_SESSION_INVALID",
+        message: "Сессия Telegram недействительна. Отвяжите и заново привяжите Telegram в настройках аккаунта."
+      });
+    }
+
     return res.status(500).json({
-      status: "error",
+      success: false,
+      error: "UPLOAD_FAILED",
       message: errorMessage || "Ошибка сервера при обработке видео. Попробуйте позже."
     });
   }

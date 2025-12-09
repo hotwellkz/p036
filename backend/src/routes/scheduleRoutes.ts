@@ -13,6 +13,7 @@ export interface ScheduleSettings {
   minInterval_13_17?: number; // 13:00–17:00
   minInterval_17_24?: number; // 17:00–24:00
   conflictsCheckEnabled: boolean;
+  isAutomationPaused: boolean; // Пауза автоматизации публикаций
 }
 
 const DEFAULT_SETTINGS: ScheduleSettings = {
@@ -20,7 +21,8 @@ const DEFAULT_SETTINGS: ScheduleSettings = {
   minInterval_00_13: 11,
   minInterval_13_17: 11,
   minInterval_17_24: 11,
-  conflictsCheckEnabled: true
+  conflictsCheckEnabled: true,
+  isAutomationPaused: false
 };
 
 function getSettingsDocRef(userId: string) {
@@ -74,7 +76,11 @@ router.get("/settings", authRequired, async (req, res) => {
       conflictsCheckEnabled:
         typeof data?.conflictsCheckEnabled === "boolean"
           ? data.conflictsCheckEnabled
-          : DEFAULT_SETTINGS.conflictsCheckEnabled
+          : DEFAULT_SETTINGS.conflictsCheckEnabled,
+      isAutomationPaused:
+        typeof data?.isAutomationPaused === "boolean"
+          ? data.isAutomationPaused
+          : DEFAULT_SETTINGS.isAutomationPaused
     };
 
     res.json(settings);
@@ -111,7 +117,8 @@ router.patch("/settings", authRequired, async (req, res) => {
       minInterval_00_13, 
       minInterval_13_17, 
       minInterval_17_24,
-      conflictsCheckEnabled 
+      conflictsCheckEnabled,
+      isAutomationPaused
     } = req.body as Partial<ScheduleSettings>;
 
     const updates: Partial<ScheduleSettings> = {};
@@ -173,6 +180,16 @@ router.patch("/settings", authRequired, async (req, res) => {
       updates.conflictsCheckEnabled = conflictsCheckEnabled;
     }
 
+    if (typeof isAutomationPaused !== "undefined") {
+      if (typeof isAutomationPaused !== "boolean") {
+        return res.status(400).json({
+          error: "Invalid request",
+          message: "isAutomationPaused должен быть boolean"
+        });
+      }
+      updates.isAutomationPaused = isAutomationPaused;
+    }
+
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({
         error: "Invalid request",
@@ -205,7 +222,11 @@ router.patch("/settings", authRequired, async (req, res) => {
       conflictsCheckEnabled:
         typeof data?.conflictsCheckEnabled === "boolean"
           ? data.conflictsCheckEnabled
-          : DEFAULT_SETTINGS.conflictsCheckEnabled
+          : DEFAULT_SETTINGS.conflictsCheckEnabled,
+      isAutomationPaused:
+        typeof data?.isAutomationPaused === "boolean"
+          ? data.isAutomationPaused
+          : DEFAULT_SETTINGS.isAutomationPaused
     };
 
     Logger.info("Schedule settings updated", {

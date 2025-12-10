@@ -6,6 +6,7 @@ import {
   disconnectGoogleDrive,
   type GoogleDriveIntegrationStatus
 } from "../api/googleDriveIntegration";
+import { SectionHelpButton } from "./aiAssistant/SectionHelpButton";
 
 const GoogleDriveIntegration = () => {
   const [status, setStatus] = useState<GoogleDriveIntegrationStatus | null>(null);
@@ -87,7 +88,15 @@ const GoogleDriveIntegration = () => {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Google Drive интеграция</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">Google Drive интеграция</h2>
+          <SectionHelpButton
+            sectionKey="google_drive_integration"
+            sectionTitle="Google Drive интеграция"
+            currentStatus={currentStatus}
+            context={{ email: status?.email }}
+          />
+        </div>
         <p className="mt-2 text-sm text-slate-400">
           Подключите свой Google Drive для автоматической загрузки видео
         </p>

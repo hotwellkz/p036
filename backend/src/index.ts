@@ -38,6 +38,7 @@ import channelRoutes from "./routes/channelRoutes";
 import scheduleRoutes from "./routes/scheduleRoutes";
 import notificationRoutes from "./routes/notificationRoutes";
 import adminRoutes from "./routes/adminRoutes";
+import helpRoutes from "./routes/helpRoutes";
 import { processAutoSendTick } from "./services/autoSendScheduler";
 import { Logger } from "./utils/logger";
 import { getFirestoreInfo, isFirestoreAvailable } from "./services/firebaseAdmin";
@@ -98,6 +99,7 @@ app.use("/api/channels", channelRoutes);
 app.use("/api/schedule", scheduleRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/help", helpRoutes);
 
 // Логируем подключенные маршруты для диагностики
 Logger.info("Backend routes registered", {

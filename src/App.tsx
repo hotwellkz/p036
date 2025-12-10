@@ -1,5 +1,8 @@
 import { BrowserRouter } from "react-router-dom";
 import AppRouter from "./router";
+import { AIAssistantProvider } from "./components/aiAssistant/AIAssistantProvider";
+import { AIAssistantPanel } from "./components/aiAssistant/AIAssistantPanel";
+import { AIAssistantFloatingButton } from "./components/aiAssistant/AIAssistantFloatingButton";
 
 const App = () => {
   return (
@@ -9,7 +12,11 @@ const App = () => {
         v7_relativeSplatPath: true
       }}
     >
-      <AppRouter />
+      <AIAssistantProvider>
+        <AppRouter />
+        <AIAssistantPanel />
+        <AIAssistantFloatingButton />
+      </AIAssistantProvider>
     </BrowserRouter>
   );
 };

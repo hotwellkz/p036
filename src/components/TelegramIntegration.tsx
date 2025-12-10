@@ -8,6 +8,7 @@ import {
   resetTelegramIntegration,
   type TelegramIntegrationStatus
 } from "../api/telegramIntegration";
+import { SectionHelpButton } from "./aiAssistant/SectionHelpButton";
 
 const TelegramIntegration = () => {
   const [status, setStatus] = useState<TelegramIntegrationStatus | null>(null);
@@ -195,7 +196,15 @@ const TelegramIntegration = () => {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-lg font-semibold">Telegram интеграция</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-semibold">Telegram интеграция</h3>
+          <SectionHelpButton
+            sectionKey="telegram_integration"
+            sectionTitle="Telegram интеграция"
+            currentStatus={currentStatus}
+            context={{ phoneNumber: status?.phoneNumber }}
+          />
+        </div>
         <p className="mt-1 text-sm text-slate-400">
           Привяжите свой Telegram аккаунт для отправки промптов от вашего имени
         </p>

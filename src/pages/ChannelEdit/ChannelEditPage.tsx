@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { FormEvent } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Loader2, Save, X, Plus, Trash2, Play } from "lucide-react";
 import { useAuthStore } from "../../stores/authStore";
 import { useChannelStore } from "../../stores/channelStore";
@@ -20,6 +20,9 @@ import { fetchScheduleSettings, getMinIntervalForTime, type ScheduleSettings } f
 import { useToast } from "../../hooks/useToast";
 import Toast from "../../components/Toast";
 import TelegramGlobalPasswordModal from "../../components/TelegramGlobalPasswordModal";
+import { FieldHelpIcon } from "../../components/aiAssistant/FieldHelpIcon";
+import { IntegrationsStatusBlock } from "../../components/IntegrationsStatusBlock";
+import { useIntegrationsStatus } from "../../hooks/useIntegrationsStatus";
 
 const PLATFORMS: { value: SupportedPlatform; label: string }[] = [
   { value: "YOUTUBE_SHORTS", label: "YouTube Shorts" },
@@ -90,6 +93,17 @@ const ChannelEditPage = () => {
   const [scheduleSettings, setScheduleSettings] = useState<ScheduleSettings | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [pendingTransportChange, setPendingTransportChange] = useState<"telegram_global" | null>(null);
+  const integrationsStatus = useIntegrationsStatus();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Проверяем, вернулись ли мы после OAuth
+  useEffect(() => {
+    const integrationRefreshed = searchParams.get("integration_refreshed");
+    if (integrationRefreshed) {
+      integrationsStatus.refreshStatus();
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, integrationsStatus, setSearchParams]);
 
   useEffect(() => {
     if (!user?.uid || !channelId) {
@@ -304,7 +318,7 @@ const ChannelEditPage = () => {
       }
       
       // Проверяем статус Telegram интеграции
-      if (!telegramStatusLoading && telegramStatus?.status !== "active") {
+      if (!integrationsStatus.status.telegram.connected) {
         const errorMsg = "Для использования личного Telegram аккаунта необходимо привязать Telegram в настройках профиля";
         setError(errorMsg);
         showError(errorMsg, 6000);
@@ -568,8 +582,19 @@ const ChannelEditPage = () => {
               <div className="space-y-6 pt-2">
                 {/* Название канала - на всю ширину */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-200">
-                    Название канала *
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    <span>Название канала *</span>
+                    <FieldHelpIcon
+                      fieldKey="channel.name"
+                      page="channelEdit"
+                      channelContext={{
+                        name: channel.name,
+                        platform: channel.platform,
+                        language: channel.language
+                      }}
+                      currentValue={channel.name}
+                      label="Название канала"
+                    />
                   </label>
                   <input
                     type="text"
@@ -585,8 +610,19 @@ const ChannelEditPage = () => {
 
                 {/* Платформа - на всю ширину */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-200">
-                    Платформа *
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    <span>Платформа *</span>
+                    <FieldHelpIcon
+                      fieldKey="channel.platform"
+                      page="channelEdit"
+                      channelContext={{
+                        name: channel.name,
+                        platform: channel.platform,
+                        language: channel.language
+                      }}
+                      currentValue={channel.platform}
+                      label="Платформа"
+                    />
                   </label>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {PLATFORMS.map((platform) => (
@@ -613,8 +649,19 @@ const ChannelEditPage = () => {
                   {/* Левая колонка */}
                   <div className="space-y-6">
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-slate-200">
-                        Язык *
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                        <span>Язык *</span>
+                        <FieldHelpIcon
+                          fieldKey="channel.language"
+                          page="channelEdit"
+                          channelContext={{
+                            name: channel.name,
+                            platform: channel.platform,
+                            language: channel.language
+                          }}
+                          currentValue={channel.language}
+                          label="Язык"
+                        />
                       </label>
                       <div className="grid gap-3">
                         {LANGUAGES.map((lang) => (
@@ -637,8 +684,19 @@ const ChannelEditPage = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-slate-200">
-                        Длительность (сек) *
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                        <span>Длительность (сек) *</span>
+                        <FieldHelpIcon
+                          fieldKey="channel.targetDurationSec"
+                          page="channelEdit"
+                          channelContext={{
+                            name: channel.name,
+                            platform: channel.platform,
+                            language: channel.language
+                          }}
+                          currentValue={channel.targetDurationSec}
+                          label="Длительность"
+                        />
                       </label>
                       <div className="grid grid-cols-2 gap-3">
                         {DURATIONS.map((duration) => (
@@ -664,8 +722,20 @@ const ChannelEditPage = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-slate-200">
-                        Ниша / Тематика *
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                        <span>Ниша / Тематика *</span>
+                        <FieldHelpIcon
+                          fieldKey="channel.niche"
+                          page="channelEdit"
+                          channelContext={{
+                            name: channel.name,
+                            platform: channel.platform,
+                            language: channel.language,
+                            niche: channel.niche
+                          }}
+                          currentValue={channel.niche}
+                          label="Ниша"
+                        />
                       </label>
                       <input
                         type="text"
@@ -683,8 +753,20 @@ const ChannelEditPage = () => {
                   {/* Правая колонка */}
                   <div className="space-y-6">
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-slate-200">
-                        Целевая аудитория *
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                        <span>Целевая аудитория *</span>
+                        <FieldHelpIcon
+                          fieldKey="channel.audience"
+                          page="channelEdit"
+                          channelContext={{
+                            name: channel.name,
+                            platform: channel.platform,
+                            language: channel.language,
+                            audience: channel.audience
+                          }}
+                          currentValue={channel.audience}
+                          label="Целевая аудитория"
+                        />
                       </label>
                       <textarea
                         value={channel.audience}
@@ -699,8 +781,20 @@ const ChannelEditPage = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-slate-200">
-                        Тон / Стиль *
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                        <span>Тон / Стиль *</span>
+                        <FieldHelpIcon
+                          fieldKey="channel.tone"
+                          page="channelEdit"
+                          channelContext={{
+                            name: channel.name,
+                            platform: channel.platform,
+                            language: channel.language,
+                            tone: channel.tone
+                          }}
+                          currentValue={channel.tone}
+                          label="Тон"
+                        />
                       </label>
                       <div className="grid gap-3 sm:grid-cols-2">
                         {TONES.map((tone) => (
@@ -721,8 +815,19 @@ const ChannelEditPage = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-slate-200">
-                        Запрещённые темы
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                        <span>Запрещённые темы</span>
+                        <FieldHelpIcon
+                          fieldKey="channel.blockedTopics"
+                          page="channelEdit"
+                          channelContext={{
+                            name: channel.name,
+                            platform: channel.platform,
+                            language: channel.language
+                          }}
+                          currentValue={channel.blockedTopics}
+                          label="Запрещённые темы"
+                        />
                       </label>
                       <textarea
                         value={channel.blockedTopics}
@@ -741,9 +846,23 @@ const ChannelEditPage = () => {
 
             {/* Блок логики генерации сценариев */}
             <div className="border-t border-white/10 pt-6">
-              <h3 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                Логика генерации сценариев
-              </h3>
+              <div className="mb-4 flex items-center gap-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+                  Логика генерации сценариев
+                </h3>
+                <FieldHelpIcon
+                  fieldKey="channel.preferences"
+                  page="channelEdit"
+                  channelContext={{
+                    name: channel.name,
+                    platform: channel.platform,
+                    language: channel.language,
+                    preferences: channel.preferences
+                  }}
+                  currentValue={channel.preferences}
+                  label="Дополнительные пожелания"
+                />
+              </div>
               <p className="mb-4 text-xs text-slate-500">
                 Настройте режим выбора и варианты дополнительных пожеланий
               </p>
@@ -761,8 +880,20 @@ const ChannelEditPage = () => {
             {/* Блок режима генерации */}
             <div className="border-t border-white/10 pt-6">
               <div className="space-y-2">
-                <label className="block text-sm font-semibold text-slate-200">
-                  Режим генерации *
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+                  <span>Режим генерации *</span>
+                  <FieldHelpIcon
+                    fieldKey="channel.generationMode"
+                    page="channelEdit"
+                    channelContext={{
+                      name: channel.name,
+                      platform: channel.platform,
+                      language: channel.language,
+                      generationMode: channel.generationMode
+                    }}
+                    currentValue={channel.generationMode}
+                    label="Режим генерации"
+                  />
                 </label>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <button
@@ -826,11 +957,30 @@ const ChannelEditPage = () => {
               </div>
             </div>
 
+            {/* Блок статуса интеграций */}
+            <div className="border-t border-white/10 pt-6">
+              <IntegrationsStatusBlock />
+            </div>
+
             {/* Блок источника отправки промптов */}
             <div className="border-t border-white/10 pt-6">
-              <h3 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                Источник отправки промптов
-              </h3>
+              <div className="mb-1 flex items-center gap-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+                  Источник отправки промптов
+                </h3>
+                <FieldHelpIcon
+                  fieldKey="channel.generationTransport"
+                  page="channelEdit"
+                  channelContext={{
+                    name: channel.name,
+                    platform: channel.platform,
+                    language: channel.language,
+                    generationTransport: channel.generationTransport
+                  }}
+                  currentValue={channel.generationTransport}
+                  label="Источник отправки промптов"
+                />
+              </div>
               <p className="mb-4 text-xs text-slate-500">
                 Выберите, от какого аккаунта отправлять промпты в Syntax
               </p>
@@ -881,49 +1031,53 @@ const ChannelEditPage = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    // Проверяем статус интеграции перед переключением
+                    if (!integrationsStatus.status.telegram.connected) {
+                      showError("Сначала подключите Telegram на уровне аккаунта, затем вернитесь к настройкам канала.", 5000);
+                      return;
+                    }
                     setChannel({
                       ...channel,
                       generationTransport: "telegram_user"
-                    })
-                  }
-                  disabled={telegramStatusLoading || telegramStatus?.status !== "active"}
+                    });
+                  }}
+                  disabled={telegramStatusLoading || telegramStatus?.status !== "active" || !integrationsStatus.status.telegram.connected}
                   className={`rounded-xl border px-4 py-3 text-left transition-all duration-200 ${
                     channel.generationTransport === "telegram_user"
                       ? "border-brand bg-brand/10 text-white shadow-md shadow-brand/20"
-                      : telegramStatusLoading || telegramStatus?.status !== "active"
+                      : telegramStatusLoading || telegramStatus?.status !== "active" || !integrationsStatus.status.telegram.connected
                       ? "border-white/5 bg-slate-950/30 text-slate-500 cursor-not-allowed"
                       : "border-white/10 bg-slate-950/60 text-slate-300 hover:border-brand/40 hover:bg-slate-900/80"
                   }`}
                 >
                   <div className="font-semibold">Telegram (мой аккаунт)</div>
                   <div className="mt-1 text-xs text-slate-400">
-                    {telegramStatusLoading || telegramStatus?.status !== "active"
+                    {telegramStatusLoading || !integrationsStatus.status.telegram.connected
                       ? "Привяжите Telegram в настройках аккаунта, чтобы отправлять промпты от своего имени"
                       : "Отправлять от вашего личного Telegram"}
                   </div>
                 </button>
               </div>
-
               {channel.generationTransport === "telegram_user" && (
                 <div className="mt-4 space-y-3">
                   {/* Проверка статуса Telegram интеграции */}
-                  {!telegramStatusLoading && telegramStatus?.status !== "active" && (
+                  {!integrationsStatus.status.telegram.connected && (
                     <div className="rounded-lg border border-amber-500/30 bg-amber-900/20 p-3">
                       <div className="flex items-start gap-2">
                         <div className="flex-1">
-                          <div className="font-medium text-amber-300">
-                            ⚠️ Telegram не привязан
+                          <div className="text-sm font-medium text-amber-300">
+                            ⚠️ Telegram не подключён
                           </div>
-                          <p className="mt-1 text-sm text-amber-200/80">
-                            Для использования вашего личного Telegram аккаунта необходимо привязать его в настройках профиля.
+                          <p className="mt-1 text-xs text-amber-200/80">
+                            Сначала подключите Telegram на уровне аккаунта, затем вернитесь к настройкам канала.
                           </p>
                           <button
                             type="button"
                             onClick={() => navigate("/settings")}
-                            className="mt-2 rounded-lg bg-amber-500/20 px-3 py-1.5 text-sm font-medium text-amber-300 transition hover:bg-amber-500/30"
+                            className="mt-2 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-300 transition hover:bg-amber-500/30"
                           >
-                            Привязать Telegram
+                            Подключить Telegram
                           </button>
                         </div>
                       </div>
@@ -931,8 +1085,20 @@ const ChannelEditPage = () => {
                   )}
                   
                   <div>
-                    <label className="block text-sm font-medium text-slate-200">
-                      Username или ID чата Syntax *
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                      <span>Username или ID чата Syntax *</span>
+                      <FieldHelpIcon
+                        fieldKey="channel.telegramSyntaxPeer"
+                        page="channelEdit"
+                        channelContext={{
+                          name: channel.name,
+                          platform: channel.platform,
+                          language: channel.language,
+                          generationTransport: channel.generationTransport
+                        }}
+                        currentValue={channel.telegramSyntaxPeer}
+                        label="Username или ID чата Syntax"
+                      />
                     </label>
                     <input
                       type="text"
@@ -948,7 +1114,7 @@ const ChannelEditPage = () => {
                       }}
                       placeholder="@SyntaxAI или 123456789"
                       className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white outline-none transition-all duration-200 placeholder:text-slate-500 focus:ring-2 focus:ring-brand/40 focus:border-brand hover:border-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                      disabled={telegramStatusLoading || telegramStatus?.status !== "active"}
+                      disabled={telegramStatusLoading || telegramStatus?.status !== "active" || !integrationsStatus.status.telegram.connected}
                     />
                     <p className="mt-1 text-xs text-slate-400">
                       Укажите username (например @SyntaxAI) или числовой ID чата
@@ -969,8 +1135,19 @@ const ChannelEditPage = () => {
 
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-200">
-                    YouTube канал (опционально)
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    <span>YouTube канал (опционально)</span>
+                    <FieldHelpIcon
+                      fieldKey="channel.youtubeUrl"
+                      page="channelEdit"
+                      channelContext={{
+                        name: channel.name,
+                        platform: channel.platform,
+                        language: channel.language
+                      }}
+                      currentValue={channel.youtubeUrl}
+                      label="YouTube канал"
+                    />
                   </label>
                   <input
                     type="url"
@@ -1005,8 +1182,19 @@ const ChannelEditPage = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-200">
-                    TikTok канал (опционально)
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    <span>TikTok канал (опционально)</span>
+                    <FieldHelpIcon
+                      fieldKey="channel.tiktokUrl"
+                      page="channelEdit"
+                      channelContext={{
+                        name: channel.name,
+                        platform: channel.platform,
+                        language: channel.language
+                      }}
+                      currentValue={channel.tiktokUrl}
+                      label="TikTok канал"
+                    />
                   </label>
                   <input
                     type="url"
@@ -1041,8 +1229,19 @@ const ChannelEditPage = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-200">
-                    Instagram (опционально)
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    <span>Instagram (опционально)</span>
+                    <FieldHelpIcon
+                      fieldKey="channel.instagramUrl"
+                      page="channelEdit"
+                      channelContext={{
+                        name: channel.name,
+                        platform: channel.platform,
+                        language: channel.language
+                      }}
+                      currentValue={channel.instagramUrl}
+                      label="Instagram"
+                    />
                   </label>
                   <input
                     type="url"
@@ -1082,8 +1281,19 @@ const ChannelEditPage = () => {
 
               {/* Google Drive настройки */}
               <div className="mt-6 space-y-2">
-                <label className="block text-sm font-medium text-slate-200">
-                  Google Drive Folder ID (опционально)
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <span>Google Drive Folder ID (опционально)</span>
+                  <FieldHelpIcon
+                    fieldKey="channel.googleDriveFolderId"
+                    page="channelEdit"
+                    channelContext={{
+                      name: channel.name,
+                      platform: channel.platform,
+                      language: channel.language
+                    }}
+                    currentValue={channel.googleDriveFolderId}
+                    label="Google Drive Folder ID"
+                  />
                 </label>
                 <input
                   type="text"
@@ -1101,6 +1311,39 @@ const ChannelEditPage = () => {
                   Укажите ID папки на Google Drive, в которую будут сохраняться
                   видео из SyntX для этого канала.
                 </p>
+                {channel.googleDriveFolderId && !integrationsStatus.status.googleDrive.connected && (
+                  <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-900/20 p-3">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-amber-300">
+                          ⚠️ Google Drive не подключён
+                        </div>
+                        <p className="mt-1 text-xs text-amber-200/80">
+                          Чтобы загрузка видео работала, подключите Google Drive.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const currentPath = window.location.pathname;
+                              if (currentPath.includes("/channels/") && currentPath.includes("/edit")) {
+                                sessionStorage.setItem("googleDriveReturnTo", currentPath);
+                              }
+                              const { getGoogleDriveAuthUrl } = await import("../../api/googleDriveIntegration");
+                              const { authUrl } = await getGoogleDriveAuthUrl();
+                              window.location.href = authUrl;
+                            } catch (error: any) {
+                              showError(`Не удалось подключить Google Drive: ${error.message || "Неизвестная ошибка"}`, 5000);
+                            }
+                          }}
+                          className="mt-2 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-300 transition hover:bg-amber-500/30"
+                        >
+                          Подключить Google Drive
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1139,8 +1382,20 @@ const ChannelEditPage = () => {
                 <>
                   {/* Выбор таймзоны */}
                   <div className="mb-6 space-y-2">
-                    <label className="block text-sm font-medium text-slate-200">
-                      Временная зона
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                      <span>Временная зона</span>
+                      <FieldHelpIcon
+                        fieldKey="channel.timezone"
+                        page="channelEdit"
+                        channelContext={{
+                          name: channel.name,
+                          platform: channel.platform,
+                          language: channel.language,
+                          autoSendEnabled: channel.autoSendEnabled
+                        }}
+                        currentValue={channel.timezone}
+                        label="Временная зона"
+                      />
                     </label>
                     <select
                       value={channel.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}
@@ -1166,8 +1421,21 @@ const ChannelEditPage = () => {
                   {/* Список расписаний */}
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <label className="block text-sm font-medium text-slate-200">
-                        Расписание отправки
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                        <span>Расписание отправки</span>
+                        <FieldHelpIcon
+                          fieldKey="channel.autoSendSchedules"
+                          page="channelEdit"
+                          channelContext={{
+                            name: channel.name,
+                            platform: channel.platform,
+                            language: channel.language,
+                            autoSendEnabled: channel.autoSendEnabled,
+                            timezone: channel.timezone
+                          }}
+                          currentValue={channel.autoSendSchedules}
+                          label="Расписание отправки"
+                        />
                       </label>
                       <button
                         type="button"
@@ -1245,8 +1513,22 @@ const ChannelEditPage = () => {
 
                           {/* Дни недели */}
                           <div className="mb-4">
-                            <label className="mb-2 block text-xs font-medium text-slate-300">
-                              Дни недели
+                            <label className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
+                              <span>Дни недели</span>
+                              <FieldHelpIcon
+                                fieldKey="channel.autoSendSchedules.daysOfWeek"
+                                page="channelEdit"
+                                channelContext={{
+                                  name: channel.name,
+                                  platform: channel.platform,
+                                  language: channel.language,
+                                  autoSendEnabled: channel.autoSendEnabled,
+                                  timezone: channel.timezone,
+                                  schedule: schedule
+                                }}
+                                currentValue={schedule.daysOfWeek}
+                                label="Дни недели для расписания"
+                              />
                             </label>
                             <div className="flex flex-wrap gap-2">
                               {[
@@ -1297,8 +1579,22 @@ const ChannelEditPage = () => {
                           {/* Время и количество промптов */}
                           <div className="grid gap-4 sm:grid-cols-2">
                             <div>
-                              <label className="mb-2 block text-xs font-medium text-slate-300">
-                                Время (HH:MM)
+                              <label className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
+                                <span>Время (HH:MM)</span>
+                                <FieldHelpIcon
+                                  fieldKey="channel.autoSendSchedules.time"
+                                  page="channelEdit"
+                                  channelContext={{
+                                    name: channel.name,
+                                    platform: channel.platform,
+                                    language: channel.language,
+                                    autoSendEnabled: channel.autoSendEnabled,
+                                    timezone: channel.timezone,
+                                    schedule: schedule
+                                  }}
+                                  currentValue={schedule.time}
+                                  label="Время отправки"
+                                />
                               </label>
                               <input
                                 type="time"
@@ -1318,8 +1614,22 @@ const ChannelEditPage = () => {
                               />
                             </div>
                             <div>
-                              <label className="mb-2 block text-xs font-medium text-slate-300">
-                                Количество промптов за запуск
+                              <label className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
+                                <span>Количество промптов за запуск</span>
+                                <FieldHelpIcon
+                                  fieldKey="channel.autoSendSchedules.promptsPerRun"
+                                  page="channelEdit"
+                                  channelContext={{
+                                    name: channel.name,
+                                    platform: channel.platform,
+                                    language: channel.language,
+                                    autoSendEnabled: channel.autoSendEnabled,
+                                    timezone: channel.timezone,
+                                    schedule: schedule
+                                  }}
+                                  currentValue={schedule.promptsPerRun}
+                                  label="Количество промптов за запуск"
+                                />
                               </label>
                               <input
                                 type="number"
@@ -1475,8 +1785,20 @@ const ChannelEditPage = () => {
 
               {/* Поле chatId */}
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-slate-200">
-                  Telegram chat ID для уведомлений (необязательно)
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <span>Telegram chat ID для уведомлений (необязательно)</span>
+                  <FieldHelpIcon
+                    fieldKey="channel.uploadNotificationChatId"
+                    page="channelEdit"
+                    channelContext={{
+                      name: channel.name,
+                      platform: channel.platform,
+                      language: channel.language,
+                      uploadNotificationEnabled: channel.uploadNotificationEnabled
+                    }}
+                    currentValue={channel.uploadNotificationChatId}
+                    label="Telegram chat ID для уведомлений"
+                  />
                 </label>
                 <input
                   type="text"
@@ -1532,8 +1854,20 @@ const ChannelEditPage = () => {
                 <div className="space-y-4">
                   {/* ID входной папки Google Drive */}
                   <div className="space-y-2">
-                    <label className="block text-sm font-medium text-slate-200">
-                      ID входной папки Google Drive *
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                      <span>ID входной папки Google Drive *</span>
+                      <FieldHelpIcon
+                        fieldKey="channel.driveInputFolderId"
+                        page="channelEdit"
+                        channelContext={{
+                          name: channel.name,
+                          platform: channel.platform,
+                          language: channel.language,
+                          blotataEnabled: channel.blotataEnabled
+                        }}
+                        currentValue={channel.driveInputFolderId}
+                        label="ID входной папки Google Drive"
+                      />
                     </label>
                     <input
                       type="text"
@@ -1554,8 +1888,20 @@ const ChannelEditPage = () => {
 
                   {/* ID папки архива Google Drive */}
                   <div className="space-y-2">
-                    <label className="block text-sm font-medium text-slate-200">
-                      ID папки архива Google Drive *
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                      <span>ID папки архива Google Drive *</span>
+                      <FieldHelpIcon
+                        fieldKey="channel.driveArchiveFolderId"
+                        page="channelEdit"
+                        channelContext={{
+                          name: channel.name,
+                          platform: channel.platform,
+                          language: channel.language,
+                          blotataEnabled: channel.blotataEnabled
+                        }}
+                        currentValue={channel.driveArchiveFolderId}
+                        label="ID папки архива Google Drive"
+                      />
                     </label>
                     <input
                       type="text"
@@ -1576,8 +1922,20 @@ const ChannelEditPage = () => {
 
                   {/* Blottata API Key */}
                   <div className="space-y-2">
-                    <label className="block text-sm font-medium text-slate-200">
-                      Blottata API Key *
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                      <span>Blottata API Key *</span>
+                      <FieldHelpIcon
+                        fieldKey="channel.blotataApiKey"
+                        page="channelEdit"
+                        channelContext={{
+                          name: channel.name,
+                          platform: channel.platform,
+                          language: channel.language,
+                          blotataEnabled: channel.blotataEnabled
+                        }}
+                        currentValue={channel.blotataApiKey ? "***" : ""}
+                        label="Blottata API Key"
+                      />
                     </label>
                     <input
                       type="password"
@@ -1604,8 +1962,20 @@ const ChannelEditPage = () => {
                     
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          YouTube ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>YouTube ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataYoutubeId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataYoutubeId}
+                            label="YouTube ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1622,8 +1992,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          TikTok ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>TikTok ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataTiktokId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataTiktokId}
+                            label="TikTok ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1640,8 +2022,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          Instagram ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>Instagram ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataInstagramId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataInstagramId}
+                            label="Instagram ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1658,8 +2052,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          Facebook ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>Facebook ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataFacebookId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataFacebookId}
+                            label="Facebook ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1676,8 +2082,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          Facebook Page ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>Facebook Page ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataFacebookPageId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataFacebookPageId}
+                            label="Facebook Page ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1694,8 +2112,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          Threads ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>Threads ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataThreadsId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataThreadsId}
+                            label="Threads ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1712,8 +2142,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          Twitter ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>Twitter ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataTwitterId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataTwitterId}
+                            label="Twitter ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1730,8 +2172,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          LinkedIn ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>LinkedIn ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataLinkedinId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataLinkedinId}
+                            label="LinkedIn ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1748,8 +2202,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          Pinterest ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>Pinterest ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataPinterestId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataPinterestId}
+                            label="Pinterest ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1766,8 +2232,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          Pinterest Board ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>Pinterest Board ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataPinterestBoardId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataPinterestBoardId}
+                            label="Pinterest Board ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"
@@ -1784,8 +2262,20 @@ const ChannelEditPage = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-xs font-medium text-slate-300">
-                          Bluesky ID
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                          <span>Bluesky ID</span>
+                          <FieldHelpIcon
+                            fieldKey="channel.blotataBlueskyId"
+                            page="channelEdit"
+                            channelContext={{
+                              name: channel.name,
+                              platform: channel.platform,
+                              language: channel.language,
+                              blotataEnabled: channel.blotataEnabled
+                            }}
+                            currentValue={channel.blotataBlueskyId}
+                            label="Bluesky ID в Blottata"
+                          />
                         </label>
                         <input
                           type="text"

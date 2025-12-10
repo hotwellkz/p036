@@ -30,9 +30,18 @@ const GoogleDriveCallbackPage = () => {
         await confirmGoogleDriveCode(code);
         setStatus("success");
         
-        // Перенаправляем на страницу настроек через 2 секунды
+        // Проверяем, откуда пришли (из настроек или из редактирования канала)
+        const returnTo = sessionStorage.getItem("googleDriveReturnTo") || "/settings";
+        sessionStorage.removeItem("googleDriveReturnTo");
+        
+        // Перенаправляем на нужную страницу через 2 секунды
         setTimeout(() => {
-          navigate("/settings", { replace: true });
+          if (returnTo.startsWith("/channels/") && returnTo.includes("/edit")) {
+            // Возвращаемся на страницу редактирования канала с параметром для обновления статуса
+            navigate(`${returnTo}?integration_refreshed=googleDrive`, { replace: true });
+          } else {
+            navigate(returnTo, { replace: true });
+          }
         }, 2000);
       } catch (err: any) {
         setStatus("error");

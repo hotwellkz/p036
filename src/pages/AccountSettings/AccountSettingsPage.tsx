@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../stores/authStore";
 import TelegramIntegration from "../../components/TelegramIntegration";
 import GoogleDriveIntegration from "../../components/GoogleDriveIntegration";
+import { SectionHelpButton } from "../../components/aiAssistant/SectionHelpButton";
 
 const AccountSettingsPage = () => {
   const { user } = useAuthStore((state) => ({ user: state.user }));
@@ -52,7 +53,14 @@ const AccountSettingsPage = () => {
 
         <div className="space-y-6 rounded-2xl border border-white/10 bg-slate-900/60 p-8">
           <div>
-            <h2 className="text-lg font-semibold">Профиль</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Профиль</h2>
+              <SectionHelpButton
+                sectionKey="profile"
+                sectionTitle="Профиль"
+                context={{ email: user.email }}
+              />
+            </div>
             <p className="mt-2 text-sm text-slate-400">
               Вы вошли как{" "}
               <span className="font-semibold text-slate-100">

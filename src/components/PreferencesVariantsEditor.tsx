@@ -3,6 +3,7 @@ import { Copy, Trash2, Plus, ChevronDown, ChevronUp, Edit2, GripVertical } from 
 import type { ChannelPreferences, PreferenceVariant, PreferencesMode } from "../domain/channel";
 import { createPreferenceVariant, validatePreferences } from "../utils/preferencesUtils";
 import VariantEditModal from "./VariantEditModal";
+import { FieldHelpIcon } from "./aiAssistant/FieldHelpIcon";
 
 interface PreferencesVariantsEditorProps {
   preferences: ChannelPreferences | undefined;
@@ -162,8 +163,17 @@ const PreferencesVariantsEditor = ({
     <div className="space-y-4">
       {/* Режим выбора варианта */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-slate-200">
-          Режим выбора варианта пожеланий
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+          <span>Режим выбора варианта пожеланий</span>
+          <FieldHelpIcon
+            fieldKey="channel.preferences.mode"
+            page="channelEdit"
+            channelContext={{
+              preferences: currentPreferences
+            }}
+            currentValue={currentPreferences.mode}
+            label="Режим выбора варианта"
+          />
         </label>
         <select
           value={currentPreferences.mode}

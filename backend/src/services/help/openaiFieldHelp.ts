@@ -51,7 +51,10 @@ function getBaseFieldDescription(fieldKey: string): string | undefined {
     "channel.blotataPinterestId": "ID Pinterest аккаунта в системе Blottata - числовой идентификатор площадки для публикации",
     "channel.blotataPinterestBoardId": "ID доски Pinterest в системе Blottata - числовой идентификатор конкретной доски для публикации",
     "channel.blotataBlueskyId": "ID Bluesky аккаунта в системе Blottata - числовой идентификатор площадки для публикации",
-    "channel.uploadNotificationChatId": "Telegram chat ID для отправки уведомлений о загрузке видео на Google Drive. Если пусто, используется основной чат SyntX"
+    "channel.uploadNotificationChatId": "Telegram chat ID для отправки уведомлений о загрузке видео на Google Drive. Если пусто, используется основной чат SyntX",
+    "wizard.telegram_connection": "Шаг подключения Telegram в мастере создания канала. Позволяет привязать личный Telegram аккаунт для отправки промптов от имени пользователя",
+    "wizard.google_drive_connection": "Шаг авторизации Google Drive в мастере создания канала. Позволяет подключить Google Drive для автоматической загрузки и хранения видео",
+    "wizard.drive_folders": "Шаг создания папок Google Drive в мастере создания канала. Автоматически создаёт структуру папок для канала и настраивает права доступа"
   };
 
   return descriptions[fieldKey];
@@ -89,7 +92,9 @@ function buildSystemPrompt(): string {
    - Частые ошибки при заполнении
    - Что может пойти не так и как этого избежать
 
-Будь дружелюбным, но профессиональным. Используй примеры из реальной практики создания коротких видео.`;
+Будь дружелюбным, но профессиональным. Используй примеры из реальной практики создания коротких видео.
+
+Если пользователь находится в мастере создания канала (page = "wizard"), адаптируй ответ под контекст мастера: объясняй, зачем нужен этот шаг, как правильно его заполнить, и что будет дальше.`;
 }
 
 /**
@@ -114,13 +119,19 @@ function buildUserPrompt(request: FieldHelpRequest): string {
   }
   
   if (channelContext) {
-    prompt += `Контекст канала:\n`;
-    if (channelContext.name) prompt += `- Название: ${channelContext.name}\n`;
+    prompt += `Контекст:\n`;
+    if (channelContext.context === "wizard") {
+      prompt += `- Пользователь находится в мастере создания канала\n`;
+      if (channelContext.step) prompt += `- Текущий шаг мастера: ${channelContext.step}\n`;
+    }
+    if (channelContext.name) prompt += `- Название канала: ${channelContext.name}\n`;
     if (channelContext.platform) prompt += `- Платформа: ${channelContext.platform}\n`;
     if (channelContext.language) prompt += `- Язык: ${channelContext.language}\n`;
     if (channelContext.niche) prompt += `- Ниша: ${channelContext.niche}\n`;
     if (channelContext.audience) prompt += `- Аудитория: ${channelContext.audience}\n`;
     if (channelContext.tone) prompt += `- Тон: ${channelContext.tone}\n`;
+    if (channelContext.channelType) prompt += `- Тип канала: ${channelContext.channelType}\n`;
+    if (channelContext.userLanguage) prompt += `- Язык пользователя: ${channelContext.userLanguage}\n`;
     prompt += `\n`;
   }
   
@@ -212,9 +223,11 @@ export async function explainFieldWithOpenAI(request: FieldHelpRequest): Promise
 }
 
 interface SectionHelpRequest {
-  sectionKey: "telegram_integration" | "google_drive_integration" | "profile";
-  sectionTitle: string;
+  sectionKey: "telegram_integration" | "google_drive_integration" | "profile" | "generate_drive_folders" | "blottata_api_key_default";
+  page?: string;
+  sectionTitle?: string;
   currentStatus?: string;
+  question?: string;
   context?: any;
 }
 
@@ -225,7 +238,9 @@ function getBaseSectionDescription(sectionKey: string): string | undefined {
   const descriptions: Record<string, string> = {
     "telegram_integration": "Интеграция с Telegram позволяет отправлять промпты для генерации контента от имени пользователя или системного аккаунта. Это необходимо для автоматической работы с ботом Syntax.",
     "google_drive_integration": "Интеграция с Google Drive позволяет автоматически загружать и хранить видео файлы, созданные системой. Это упрощает управление контентом и обеспечивает резервное копирование.",
-    "profile": "Профиль пользователя содержит основную информацию об аккаунте: email, статус авторизации и настройки интеграций."
+    "generate_drive_folders": "Кнопка автоматического создания папок Google Drive для канала. Создаёт структуру папок и автоматически заполняет поля канала.",
+    "profile": "Профиль пользователя содержит основную информацию об аккаунте: email, статус авторизации и настройки интеграций.",
+    "blottata_api_key_default": "Поле для хранения API ключа Blottata по умолчанию. Этот ключ автоматически подставляется в настройки новых каналов, но может быть переопределён для конкретного канала. Blottata — это сервис для автоматической публикации видео в различные социальные сети."
   };
 
   return descriptions[sectionKey];
@@ -261,19 +276,32 @@ function buildSectionSystemPrompt(): string {
 5. Если что-то пошло не так
    Типичные ошибки и что можно попробовать: переподключение, проверка правильного аккаунта, обновление страницы.
 
-Будь дружелюбным, но профессиональным. Используй простые слова, короткие предложения, без сложных технических терминов.`;
+Будь дружелюбным, но профессиональным. Используй простые слова, короткие предложения, без сложных технических терминов.
+
+Для section = "telegram_integration" опиши интеграцию с Telegram (для отправки промптов и сообщений от имени пользователя или системного аккаунта).
+Для section = "google_drive_integration" опиши интеграцию с Google Drive (для автоматической загрузки и хранения видео/файлов).
+Для section = "profile" коротко объясни, что здесь данные аккаунта и как их можно изменить.
+Для section = "generate_drive_folders" объясни, что эта кнопка автоматически создаёт нужные папки на Google Drive для работы автоматизации:
+— основную папку канала для готовых видео (название: "{channelName} — {channelId}")
+— папку uploaded для архива (внутри основной папки)
+После создания система сама заполняет все нужные поля канала (Google Drive Folder ID, ID входной папки, ID папки архива) и выдаёт права доступа сервис-аккаунту для автоматической загрузки видео.
+Для section = "blottata_api_key_default" объясни, что это поле для хранения API ключа Blottata по умолчанию. Этот ключ автоматически подставляется в настройки новых каналов при их создании, но может быть переопределён для конкретного канала в его настройках. Blottata — это сервис для автоматической публикации видео в различные социальные сети (YouTube, TikTok, Instagram и др.). Если это поле оставить пустым, при создании новых каналов API ключ придётся указывать вручную для каждого канала.`;
 }
 
 /**
  * Формирует пользовательский промпт для секций
  */
 function buildSectionUserPrompt(request: SectionHelpRequest): string {
-  const { sectionKey, sectionTitle, currentStatus, context } = request;
+  const { sectionKey, page, sectionTitle, currentStatus, question, context } = request;
   
   const baseDescription = getBaseSectionDescription(sectionKey);
   
-  let prompt = `Секция: ${sectionTitle}\n`;
-  prompt += `Ключ секции: ${sectionKey}\n\n`;
+  let prompt = `Секция: ${sectionTitle || sectionKey}\n`;
+  prompt += `Ключ секции: ${sectionKey}\n`;
+  if (page) {
+    prompt += `Страница: ${page}\n`;
+  }
+  prompt += `\n`;
   
   if (baseDescription) {
     prompt += `Базовое описание: ${baseDescription}\n\n`;
@@ -285,6 +313,10 @@ function buildSectionUserPrompt(request: SectionHelpRequest): string {
   
   if (context) {
     prompt += `Дополнительный контекст: ${JSON.stringify(context)}\n\n`;
+  }
+  
+  if (question) {
+    prompt += `Вопрос пользователя: ${question}\n\n`;
   }
   
   prompt += `Объясни эту секцию согласно структуре из системного промпта.`;

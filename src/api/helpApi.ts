@@ -19,9 +19,11 @@ export interface ExplainFieldResponse {
 }
 
 export interface ExplainSectionParams {
-  sectionKey: "telegram_integration" | "google_drive_integration" | "profile";
-  sectionTitle: string;
+  sectionKey: "telegram_integration" | "google_drive_integration" | "profile" | "generate_drive_folders";
+  page?: string;
+  sectionTitle?: string;
   currentStatus?: string;
+  question?: string;
   context?: any;
 }
 

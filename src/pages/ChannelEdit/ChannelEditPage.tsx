@@ -23,6 +23,8 @@ import TelegramGlobalPasswordModal from "../../components/TelegramGlobalPassword
 import { FieldHelpIcon } from "../../components/aiAssistant/FieldHelpIcon";
 import { IntegrationsStatusBlock } from "../../components/IntegrationsStatusBlock";
 import { useIntegrationsStatus } from "../../hooks/useIntegrationsStatus";
+import { GenerateDriveFoldersButton } from "../../components/GenerateDriveFoldersButton";
+import { getUserSettings } from "../../api/userSettings";
 
 const PLATFORMS: { value: SupportedPlatform; label: string }[] = [
   { value: "YOUTUBE_SHORTS", label: "YouTube Shorts" },
@@ -182,42 +184,97 @@ const ChannelEditPage = () => {
     if (channels.length > 0 && channelId) {
       const found = channels.find((c) => c.id === channelId);
       if (found) {
-        // Убеждаемся, что generationMode и новые поля установлены (для старых каналов)
-        setChannel({
-          ...found,
-          generationMode: found.generationMode || "script",
-          generationTransport: found.generationTransport || "telegram_global",
-          telegramSyntaxPeer: found.telegramSyntaxPeer && found.telegramSyntaxPeer.trim() !== '' 
-            ? found.telegramSyntaxPeer 
-            : '@syntxaibot',
-          youtubeUrl: found.youtubeUrl || null,
-          tiktokUrl: found.tiktokUrl || null,
-          instagramUrl: found.instagramUrl || null,
-          googleDriveFolderId: found.googleDriveFolderId,
-          autoSendEnabled: found.autoSendEnabled || false,
-          timezone: found.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-          autoSendSchedules: found.autoSendSchedules || [],
-          autoDownloadToDriveEnabled: found.autoDownloadToDriveEnabled || false,
-          autoDownloadDelayMinutes: found.autoDownloadDelayMinutes ?? 10,
-          uploadNotificationEnabled: found.uploadNotificationEnabled || false,
-          uploadNotificationChatId: found.uploadNotificationChatId ?? "",
-          blotataEnabled: found.blotataEnabled || false,
-          driveInputFolderId: found.driveInputFolderId,
-          driveArchiveFolderId: found.driveArchiveFolderId,
-          blotataApiKey: found.blotataApiKey,
-          blotataYoutubeId: found.blotataYoutubeId || null,
-          blotataTiktokId: found.blotataTiktokId || null,
-          blotataInstagramId: found.blotataInstagramId || null,
-          blotataFacebookId: found.blotataFacebookId || null,
-          blotataFacebookPageId: found.blotataFacebookPageId || null,
-          blotataThreadsId: found.blotataThreadsId || null,
-          blotataTwitterId: found.blotataTwitterId || null,
-          blotataLinkedinId: found.blotataLinkedinId || null,
-          blotataPinterestId: found.blotataPinterestId || null,
-          blotataPinterestBoardId: found.blotataPinterestBoardId || null,
-          blotataBlueskyId: found.blotataBlueskyId || null
-        });
-        setLoading(false);
+        // Загружаем настройки пользователя для подстановки defaultBlottataApiKey
+        const loadDefaultBlottataApiKey = async () => {
+          try {
+            const userSettings = await getUserSettings();
+            let defaultBlottataApiKey: string | undefined = undefined;
+            
+            // Если у канала нет blotataApiKey, но есть значение по умолчанию, подставляем его
+            if (!found.blotataApiKey && userSettings.hasDefaultBlottataApiKey && userSettings.defaultBlottataApiKey) {
+              defaultBlottataApiKey = userSettings.defaultBlottataApiKey === "****" 
+                ? undefined 
+                : userSettings.defaultBlottataApiKey;
+            }
+
+            // Убеждаемся, что generationMode и новые поля установлены (для старых каналов)
+            setChannel({
+              ...found,
+              generationMode: found.generationMode || "script",
+              generationTransport: found.generationTransport || "telegram_global",
+              telegramSyntaxPeer: found.telegramSyntaxPeer && found.telegramSyntaxPeer.trim() !== '' 
+                ? found.telegramSyntaxPeer 
+                : '@syntxaibot',
+              youtubeUrl: found.youtubeUrl || null,
+              tiktokUrl: found.tiktokUrl || null,
+              instagramUrl: found.instagramUrl || null,
+              googleDriveFolderId: found.googleDriveFolderId,
+              autoSendEnabled: found.autoSendEnabled || false,
+              timezone: found.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+              autoSendSchedules: found.autoSendSchedules || [],
+              autoDownloadToDriveEnabled: found.autoDownloadToDriveEnabled || false,
+              autoDownloadDelayMinutes: found.autoDownloadDelayMinutes ?? 10,
+              uploadNotificationEnabled: found.uploadNotificationEnabled || false,
+              uploadNotificationChatId: found.uploadNotificationChatId ?? "",
+              blotataEnabled: found.blotataEnabled || false,
+              driveInputFolderId: found.driveInputFolderId,
+              driveArchiveFolderId: found.driveArchiveFolderId,
+              blotataApiKey: found.blotataApiKey || defaultBlottataApiKey,
+              blotataYoutubeId: found.blotataYoutubeId || null,
+              blotataTiktokId: found.blotataTiktokId || null,
+              blotataInstagramId: found.blotataInstagramId || null,
+              blotataFacebookId: found.blotataFacebookId || null,
+              blotataFacebookPageId: found.blotataFacebookPageId || null,
+              blotataThreadsId: found.blotataThreadsId || null,
+              blotataTwitterId: found.blotataTwitterId || null,
+              blotataLinkedinId: found.blotataLinkedinId || null,
+              blotataPinterestId: found.blotataPinterestId || null,
+              blotataPinterestBoardId: found.blotataPinterestBoardId || null,
+              blotataBlueskyId: found.blotataBlueskyId || null
+            });
+            setLoading(false);
+          } catch (settingsError) {
+            // Если не удалось загрузить настройки, используем значения из канала
+            console.warn("Failed to load user settings for default Blottata API key", settingsError);
+            setChannel({
+              ...found,
+              generationMode: found.generationMode || "script",
+              generationTransport: found.generationTransport || "telegram_global",
+              telegramSyntaxPeer: found.telegramSyntaxPeer && found.telegramSyntaxPeer.trim() !== '' 
+                ? found.telegramSyntaxPeer 
+                : '@syntxaibot',
+              youtubeUrl: found.youtubeUrl || null,
+              tiktokUrl: found.tiktokUrl || null,
+              instagramUrl: found.instagramUrl || null,
+              googleDriveFolderId: found.googleDriveFolderId,
+              autoSendEnabled: found.autoSendEnabled || false,
+              timezone: found.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+              autoSendSchedules: found.autoSendSchedules || [],
+              autoDownloadToDriveEnabled: found.autoDownloadToDriveEnabled || false,
+              autoDownloadDelayMinutes: found.autoDownloadDelayMinutes ?? 10,
+              uploadNotificationEnabled: found.uploadNotificationEnabled || false,
+              uploadNotificationChatId: found.uploadNotificationChatId ?? "",
+              blotataEnabled: found.blotataEnabled || false,
+              driveInputFolderId: found.driveInputFolderId,
+              driveArchiveFolderId: found.driveArchiveFolderId,
+              blotataApiKey: found.blotataApiKey,
+              blotataYoutubeId: found.blotataYoutubeId || null,
+              blotataTiktokId: found.blotataTiktokId || null,
+              blotataInstagramId: found.blotataInstagramId || null,
+              blotataFacebookId: found.blotataFacebookId || null,
+              blotataFacebookPageId: found.blotataFacebookPageId || null,
+              blotataThreadsId: found.blotataThreadsId || null,
+              blotataTwitterId: found.blotataTwitterId || null,
+              blotataLinkedinId: found.blotataLinkedinId || null,
+              blotataPinterestId: found.blotataPinterestId || null,
+              blotataPinterestBoardId: found.blotataPinterestBoardId || null,
+              blotataBlueskyId: found.blotataBlueskyId || null
+            });
+            setLoading(false);
+          }
+        };
+        
+        void loadDefaultBlottataApiKey();
       }
     }
   }, [channels, channelId]);
@@ -1126,14 +1183,12 @@ const ChannelEditPage = () => {
 
             {/* Блок ссылок на соцсети */}
             <div className="border-t border-white/10 pt-6">
-              <h3 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                Ссылки на соцсети
-              </h3>
-              <p className="mb-4 text-xs text-slate-500">
-                Укажите ссылки на ваши аккаунты в социальных сетях (опционально)
-              </p>
-
-              <div className="space-y-4">
+              <Accordion
+                title="Ссылки на соцсети (опционально)"
+                defaultOpen={false}
+                summary="Разверните, если хотите указать ссылки на YouTube, TikTok, Instagram и другие соцсети."
+              >
+                <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
                     <span>YouTube канал (опционально)</span>
@@ -1277,7 +1332,8 @@ const ChannelEditPage = () => {
                     <p className="text-xs text-red-400">{urlErrors.instagram}</p>
                   )}
                 </div>
-              </div>
+                </div>
+              </Accordion>
 
               {/* Google Drive настройки */}
               <div className="mt-6 space-y-2">
@@ -1343,6 +1399,28 @@ const ChannelEditPage = () => {
                       </div>
                     </div>
                   </div>
+                )}
+
+                {/* Кнопка автоматического создания папок */}
+                {integrationsStatus.status.googleDrive.connected && channelId && (
+                  <GenerateDriveFoldersButton
+                    channelId={channelId}
+                    channelName={channel.name}
+                    hasExistingFolders={!!(channel.googleDriveFolderId || channel.driveInputFolderId || channel.driveArchiveFolderId)}
+                    onFoldersGenerated={(rootFolderId, archiveFolderId) => {
+                      // Обновляем состояние канала с новыми folder ID
+                      setChannel({
+                        ...channel,
+                        googleDriveFolderId: rootFolderId,
+                        driveInputFolderId: rootFolderId,
+                        driveArchiveFolderId: archiveFolderId
+                      });
+                      // Обновляем список каналов для синхронизации
+                      if (user?.uid) {
+                        fetchChannels(user.uid);
+                      }
+                    }}
+                  />
                 )}
               </div>
             </div>

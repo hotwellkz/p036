@@ -34,12 +34,14 @@ export interface AskFieldHelpParams {
   currentValue?: any;
 }
 
-export type SectionHelpKey = "telegram_integration" | "google_drive_integration" | "profile";
+export type SectionHelpKey = "telegram_integration" | "google_drive_integration" | "profile" | "generate_drive_folders" | "blottata_api_key_default";
 
 export interface AskSectionHelpParams {
   sectionKey: SectionHelpKey;
-  sectionTitle: string;
+  page?: string;
+  sectionTitle?: string;
   currentStatus?: string;
+  question?: string;
   context?: any;
 }
 

@@ -68,26 +68,29 @@ router.post("/explain-field", authRequired, async (req, res) => {
  */
 router.post("/explain-section", authRequired, async (req, res) => {
   try {
-    const { sectionKey, sectionTitle, currentStatus, context } = req.body;
+    const { sectionKey, page, sectionTitle, currentStatus, question, context } = req.body;
 
-    if (!sectionKey || !sectionTitle) {
+    if (!sectionKey) {
       return res.status(400).json({
         success: false,
         error: "MISSING_PARAMS",
-        message: "Отсутствуют обязательные параметры: sectionKey или sectionTitle"
+        message: "Отсутствует обязательный параметр: sectionKey"
       });
     }
 
     Logger.info("explain-section request", {
       userId: req.user!.uid,
       sectionKey,
+      page,
       sectionTitle
     });
 
     const answer = await explainSectionWithOpenAI({
       sectionKey,
+      page,
       sectionTitle,
       currentStatus,
+      question,
       context
     });
 

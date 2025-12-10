@@ -79,7 +79,7 @@ export function useAIAssistant() {
   }, [isOpen, addMessage]);
 
   const askSectionHelp = useCallback(async (params: AskSectionHelpParams) => {
-    const { sectionKey, sectionTitle, currentStatus, context } = params;
+    const { sectionKey, page, sectionTitle, currentStatus, question, context } = params;
     
     // Открываем панель, если она закрыта
     if (!isOpen) {
@@ -90,7 +90,7 @@ export function useAIAssistant() {
     setCurrentFieldKey(null);
 
     // Формируем вопрос
-    const userQuestion = `Объясни секцию "${sectionTitle}" и как её правильно настроить.`;
+    const userQuestion = question || `Объясни секцию "${sectionTitle || sectionKey}" и как её правильно настроить.`;
 
     // Добавляем сообщение пользователя
     addMessage("user", userQuestion);
@@ -100,8 +100,10 @@ export function useAIAssistant() {
     try {
       const requestParams: ExplainSectionParams = {
         sectionKey,
+        page,
         sectionTitle,
         currentStatus,
+        question,
         context
       };
 

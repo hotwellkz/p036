@@ -5,6 +5,7 @@ import { useAuthStore } from "../../stores/authStore";
 import TelegramIntegration from "../../components/TelegramIntegration";
 import GoogleDriveIntegration from "../../components/GoogleDriveIntegration";
 import { SectionHelpButton } from "../../components/aiAssistant/SectionHelpButton";
+import { BlottataApiKeySettings } from "../../components/BlottataApiKeySettings";
 
 const AccountSettingsPage = () => {
   const { user } = useAuthStore((state) => ({ user: state.user }));
@@ -77,6 +78,8 @@ const AccountSettingsPage = () => {
           <div className="border-t border-white/10 pt-6">
             <GoogleDriveIntegration />
           </div>
+
+          <BlottataApiKeySettings />
         </div>
       </div>
     </div>

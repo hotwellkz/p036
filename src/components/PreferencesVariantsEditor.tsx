@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Copy, Trash2, Plus, ChevronDown, ChevronUp, Edit2, GripVertical } from "lucide-react";
 import type { ChannelPreferences, PreferenceVariant, PreferencesMode } from "../domain/channel";
 import { createPreferenceVariant, validatePreferences } from "../utils/preferencesUtils";
@@ -32,11 +32,17 @@ const PreferencesVariantsEditor = ({
   }, []);
 
   // Инициализация preferences если их нет
-  const currentPreferences: ChannelPreferences = preferences || {
-    variants: [createPreferenceVariant("", 1)],
-    mode: "cyclic",
-    lastUsedIndex: 0
-  };
+  // Используем useMemo, чтобы избежать создания нового объекта на каждом рендере
+  const currentPreferences: ChannelPreferences = useMemo(() => {
+    return preferences || {
+      variants: [createPreferenceVariant("", 1)],
+      mode: "cyclic",
+      lastUsedIndex: 0
+    };
+  }, [preferences]);
+  
+  // Используем JSON.stringify для сравнения, чтобы избежать лишних вызовов валидации
+  const preferencesKey = useMemo(() => JSON.stringify(currentPreferences), [currentPreferences]);
 
   const toggleVariantExpanded = (variantId: string) => {
     const newExpanded = new Set(expandedVariants);
@@ -157,7 +163,8 @@ const PreferencesVariantsEditor = ({
     if (onValidationChange) {
       onValidationChange(validation.valid);
     }
-  }, [currentPreferences, onValidationChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferencesKey]); // Используем стабильный ключ вместо объекта, чтобы избежать бесконечного цикла
 
   return (
     <div className="space-y-4">
